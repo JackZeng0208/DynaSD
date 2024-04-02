@@ -1,0 +1,6 @@
+transformers==4.36.1
+datasets==2.15.0
+bitsandbytes==0.41.3.post2
+accelerate==0.25.0
+flask==3.0.0
+GPUtil==1.4.0
