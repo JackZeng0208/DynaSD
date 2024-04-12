@@ -5,10 +5,11 @@ from tqdm import tqdm
 from collections import Counter
 import re
 import string
+from vllm import LLM
 
-generation_config = GenerationConfig(
-    max_length = 100
-    )
+# generation_config = GenerationConfig(
+#     max_length = 100
+#     )
 
 # Copy from TriviaQA Evaluation Code
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
@@ -52,38 +53,34 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
         scores_for_ground_truths.append(score)
     return max(scores_for_ground_truths)
 
-def evaluate(model, tokenizer, dataset, device):
-    model.eval()
+def evaluate(model, dataset):
     f1 = exact_match = total = 0
-    
     for example in tqdm(dataset):
-        # print(example)
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
-        input_ids = tokenizer(input_str, return_tensors="pt").input_ids.to(device)
-        
-        with torch.no_grad():
-            outputs = model.generate(input_ids, generation_config = generation_config)
-
-        pred_answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        pred_answer = model.generate(input_str)
         # print(pred_answer)
+        pred_answer = pred_answer[0].outputs[0].text.strip()
         ground_truths = example["answer"]["aliases"]
-
-        exact_match += metric_max_over_ground_truths(exact_match_score, pred_answer, ground_truths) 
+        exact_match += metric_max_over_ground_truths(exact_match_score, pred_answer, ground_truths)
         f1 += metric_max_over_ground_truths(f1_score, pred_answer, ground_truths)
         total += 1
-    
     exact_match = 100.0 * exact_match / total
     f1 = 100.0 * f1 / total
-    
     return {'exact_match': exact_match, 'f1': f1}
-    
+
 # Load the TriviaQA dataset
 dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
 dataset = dataset['validation']
-tokenizer = LlamaTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
-model = LlamaForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", load_in_8bit = True, torch_dtype=torch.float16)
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-eval_result = evaluate(model, tokenizer, dataset, device)
-with open("eval_result_vanilla_llama_triviaQA.txt", 'w') as f:
+
+model = LLM(
+    "meta-llama/Llama-2-7b-chat-hf",
+    max_context_len_to_capture=256,
+    tensor_parallel_size=2,
+    tokenizer="meta-llama/Llama-2-7b-chat-hf"
+)
+
+eval_result = evaluate(model, dataset)
+
+with open("eval_result_vllm_llama_triviaQA.txt", 'w') as f:
     f.write(f"Test results: {eval_result}\n")
