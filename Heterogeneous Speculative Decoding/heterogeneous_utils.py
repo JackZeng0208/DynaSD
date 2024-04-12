@@ -60,7 +60,7 @@ def max_fn(x):
         norm(max (x, 0))
     """
     x_max = torch.where(x > 0, x, torch.zeros_like(x))
-    x_max_sum = torch.sum(x_max, dim=1, keepdim=True) 
+    x_max_sum = torch.sum(x_max, dim=1, keepdim=True)
     return x_max / x_max_sum
 
 @torch.no_grad()
