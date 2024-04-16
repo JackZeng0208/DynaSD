@@ -44,7 +44,7 @@ def edge_speculative_sampling(prefix: torch.Tensor,
         send_tensor_start_time = time.time()
         socket.send_pyobj({'type': 'send_tensor', 'draft_tokens': draft_tokens})
         response = socket.recv_pyobj()
-        print('send from edge to server', response)
+        # print('send from edge to server', response)
 
         socket.send_pyobj({'type': 'get_tensor'})
         target_model_mesg_dict = socket.recv_pyobj()
@@ -90,12 +90,13 @@ def edge_speculative_sampling(prefix: torch.Tensor,
     print(f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
     print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
     print(f"Acceptance Rate: {accepted_count / max_len}")
+    approx_model_cache.clear_cache()
     return prefix
 
 if __name__ == '__main__':
     SERVER_IP = '192.168.0.132'
-    approx_model = AutoModelForCausalLM.from_pretrained("JackFram/llama-160m", torch_dtype="auto", trust_remote_code=True)
-    approx_tokenizer = AutoTokenizer.from_pretrained("JackFram/llama-160m", trust_remote_code=True)
+    approx_model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", torch_dtype="auto", trust_remote_code=True)
+    approx_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     input_ids = approx_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
     top_k = 20
     top_p = 0.9
@@ -103,7 +104,7 @@ if __name__ == '__main__':
         prefix=input_ids,
         approx_model=approx_model,
         SERVER_IP=SERVER_IP,
-        max_len=100,
+        max_len=256,
         gamma=4,
     )
     print(f'total time on communication: {heterogeneous_stats.time_spend_sending_message}')

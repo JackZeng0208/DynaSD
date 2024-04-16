@@ -57,10 +57,6 @@ def handle_request(socket):
             socket.send_pyobj(response)
 
 if __name__ == "__main__":
-    input_ids = target_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
-    input_ids = input_ids.to("cuda:0")
-    _ = target_model(input_ids)
-
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind("tcp://*:1919")

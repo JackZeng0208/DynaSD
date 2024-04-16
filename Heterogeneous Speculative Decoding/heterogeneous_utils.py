@@ -50,8 +50,9 @@ def norm_logits(logits : torch.Tensor, temperature : float, top_k : float, top_p
 
 def sample(probs : torch.Tensor, num_samples: int = 1):
     idx_next = torch.multinomial(probs, num_samples=num_samples)
-    if (idx_next.item() == 0):
-        raise RuntimeError
+    # if (idx_next.item() == 0):
+    #     print(probs, num_samples)
+    #     raise RuntimeError
     return idx_next
 
 
@@ -104,6 +105,13 @@ class KVCacheModel(torch.nn.Module):
         self._temperature = temperature
         self._top_k = top_k
         self._top_p = top_p
+    
+    # Clear
+    def clear_cache(self):
+        del self._past_key_values
+        del self._prob_history
+        self._past_key_values = None
+        self._prob_history = None
 
     def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
         if self._past_key_values is None:
