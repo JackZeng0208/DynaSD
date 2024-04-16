@@ -44,7 +44,7 @@ def edge_speculative_sampling(prefix: torch.Tensor,
         send_tensor_start_time = time.time()
         socket.send_pyobj({'type': 'send_tensor', 'draft_tokens': draft_tokens})
         response = socket.recv_pyobj()
-        print('send from edge to server', response)
+        # print('send from edge to server', response)
 
         socket.send_pyobj({'type': 'get_tensor'})
         target_model_mesg_dict = socket.recv_pyobj()
@@ -90,6 +90,7 @@ def edge_speculative_sampling(prefix: torch.Tensor,
     print(f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
     print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
     print(f"Acceptance Rate: {accepted_count / max_len}")
+    approx_model_cache.clear_cache()
     return prefix
 
 if __name__ == '__main__':
@@ -103,7 +104,7 @@ if __name__ == '__main__':
         prefix=input_ids,
         approx_model=approx_model,
         SERVER_IP=SERVER_IP,
-        max_len=100,
+        max_len=1024,
         gamma=4,
     )
     print(f'total time on communication: {heterogeneous_stats.time_spend_sending_message}')
