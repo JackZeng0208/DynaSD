@@ -77,7 +77,7 @@ def evaluate(dataset, approx_model, SERVER_IP,client_id):
 
 if __name__ == "__main__":
     SERVER_IP = '192.168.0.132'
-    client_id = 'client_2'
+    client_id = input("Please enter the client ID: ")
     approx_model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", torch_dtype="auto", trust_remote_code=True)
     approx_model.to('cuda:0')
     dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
