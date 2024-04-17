@@ -5,7 +5,7 @@ from tqdm import tqdm
 from collections import Counter
 import re
 import string
-from speculative_decoding_client import edge_speculative_sampling
+from edge_speculative_decoding import edge_speculative_sampling
 
 def normalize_answer(s):
     """Lower text and remove punctuation, articles and extra whitespace."""
@@ -47,7 +47,7 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
         scores_for_ground_truths.append(score)
     return max(scores_for_ground_truths)
 
-def evaluate(dataset, approx_model, SERVER_IP):
+def evaluate(dataset, approx_model, SERVER_IP,client_id):
     f1 = exact_match = total = 0
     approx_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     
@@ -62,6 +62,7 @@ def evaluate(dataset, approx_model, SERVER_IP):
             SERVER_IP=SERVER_IP,
             max_len=50,
             gamma=4,
+            client_id=client_id
         )
         
         pred_answer = approx_tokenizer.batch_decode(output)[0].split("Answer:")[1].strip()
@@ -76,10 +77,11 @@ def evaluate(dataset, approx_model, SERVER_IP):
 
 if __name__ == "__main__":
     SERVER_IP = '192.168.0.132'
+    client_id = 'client_2'
     approx_model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", torch_dtype="auto", trust_remote_code=True)
     approx_model.to('cuda:0')
     dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
     dataset = dataset['validation'].select(range(1000))
-    eval_result = evaluate(dataset, approx_model, SERVER_IP)
+    eval_result = evaluate(dataset, approx_model, SERVER_IP,client_id=client_id)
     with open("eval_result_speculative_decoding_triviaQA.txt", 'w') as f:
         f.write(f"Test results: {eval_result}\n")
