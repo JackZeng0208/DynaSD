@@ -145,6 +145,7 @@ class hetero_speculative_decoding:
     def server_speculative_decoding(self, socket, target_model: torch.nn.Module):
         draft_tokens_dict = {}
         draft_tokens = None
+        target_model.to("cuda:0")
         while True:
             message = socket.recv_pyobj()
             client_id = message['client_id']
