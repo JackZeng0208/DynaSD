@@ -1,6 +1,4 @@
 from datasets import load_dataset
-from transformers import LlamaTokenizer, LlamaForCausalLM, GenerationConfig
-import torch
 from tqdm import tqdm
 from collections import Counter
 import re

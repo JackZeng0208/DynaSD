@@ -1,0 +1,6 @@
+transformers
+datasets
+bitsandbytes
+accelerate
+pyzmq
+torch
