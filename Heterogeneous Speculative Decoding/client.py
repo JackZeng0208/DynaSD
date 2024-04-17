@@ -1,4 +1,3 @@
-
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from hetero_speculative_decoding import hetero_speculative_decoding
 
@@ -7,8 +6,7 @@ if __name__ == '__main__':
     draft_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     client = hetero_speculative_decoding()
     SERVER_IP = '192.168.0.132'
-    client_id = input("Please enter the client ID: ")  # Assign a unique client ID for each client
-    
+    client_id = input("Please enter the client ID: ")
     input_ids = draft_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
     top_k = 20
     top_p = 0.9
