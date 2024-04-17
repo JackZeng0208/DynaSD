@@ -20,13 +20,13 @@ class hetero_speculative_decoding:
         self.server_draft_tokens = None
         self.edge_draft_tokens = None
 
-    def time_spend_on_draft_model_generation(self):
+    def get_time_spend_on_draft_model_generation(self):
         return self.time_spend_on_draft_model_generation
 
-    def time_spend_on_target_model_forward(self):
+    def get_time_spend_on_target_model_forward(self):
         return self.time_spend_on_target_model_forward
 
-    def time_spend_sending_message(self):
+    def get_time_spend_sending_message(self):
         return self.time_spend_sending_message
 
     def edge_speculative_decoding(self,
@@ -39,7 +39,7 @@ class hetero_speculative_decoding:
                                   top_k: int = 0,
                                   top_p: float = 0,
                                   random_seed: int = 1234,
-                                  client_id: str = None) -> torch.Tensor:
+                                  client_id: str = "") -> torch.Tensor:
         """
         Args:
             input_ids (torch.Tensor): input tensor
@@ -75,8 +75,7 @@ class hetero_speculative_decoding:
             self.edge_draft_tokens = approx_model_cache.generate(
                 input_ids, gamma)
             draft_generate_end_time = time.time()
-            self.time_spend_on_draft_model_generation += draft_generate_end_time - \
-                draft_generate_start_time
+            self.time_spend_on_draft_model_generation += draft_generate_end_time - draft_generate_start_time
 
             send_tensor_start_time = time.time()
             socket.send_pyobj(
@@ -109,8 +108,7 @@ class hetero_speculative_decoding:
             assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
             input_ids = self.edge_draft_tokens[:, :n + 1]
             approx_model_cache.rollback(n + 1)
-            assert approx_model_cache._prob_history.shape[-2] <= n + 1, f"approx_model prob list shape {
-                approx_model_cache._prob_history.shape}, n {n}"
+            assert approx_model_cache._prob_history.shape[-2] <= n + 1, f"approx_model prob list shape {approx_model_cache._prob_history.shape}, n {n}"
 
             if n < prefix_len + gamma - 1:
                 t = sample(max_fn(
@@ -163,8 +161,8 @@ class hetero_speculative_decoding:
                             "cuda:0")
                         target_forward_time = time.time()
                         target_model_history_tensor = self.sampling_without_kvcache(
-                            draft_tokens=self.server_draft_tokens,
-                            model=target_model
+                            target_model=target_model,
+                            draft_tokens=self.server_draft_tokens
                         )
                         finish_target_forward_time = time.time()
 
