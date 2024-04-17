@@ -1,11 +1,10 @@
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
 from tqdm import tqdm
 from collections import Counter
 import re
 import string
-from edge_speculative_decoding import edge_speculative_sampling
+from hetero_speculative_decoding import hetero_speculative_decoding
 
 def normalize_answer(s):
     """Lower text and remove punctuation, articles and extra whitespace."""
@@ -50,16 +49,16 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
 def evaluate(dataset, approx_model, SERVER_IP,client_id):
     f1 = exact_match = total = 0
     approx_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
-    
+    client = hetero_speculative_decoding()
     for example in tqdm(dataset):
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
         input_ids = approx_tokenizer.encode(input_str, return_tensors='pt')
         
-        output = edge_speculative_sampling(
-            prefix=input_ids,
-            approx_model=approx_model,
-            SERVER_IP=SERVER_IP,
+        output = client.edge_speculative_decoding(
+            input_ids=input_ids,
+            draft_model=approx_model,
+            server_ip=SERVER_IP,
             max_len=50,
             gamma=4,
             client_id=client_id

@@ -20,7 +20,7 @@ if __name__ == '__main__':
         gamma=4,
         client_id=client_id
     )
-    print(f'total time on communication: {client.time_spend_sending_message()}')
-    print(f'total time on target model forward: {client.time_spend_on_target_model_forward()}')
-    print(f'total time on draft model generation: {client.time_spend_on_draft_model_generation()}')
+    print(f'total time on communication: {client.get_time_spend_sending_message()}')
+    print(f'total time on target model forward: {client.get_time_spend_on_target_model_forward()}')
+    print(f'total time on draft model generation: {client.get_time_spend_on_draft_model_generation()}')
     print(f'output is {draft_tokenizer.batch_decode(output)}')
