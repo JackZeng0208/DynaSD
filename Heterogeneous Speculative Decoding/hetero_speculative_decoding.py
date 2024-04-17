@@ -155,6 +155,8 @@ class hetero_speculative_decoding:
                 socket.send_pyobj({'message': f'server received tokens from client {client_id}', 'client_id': client_id})
             elif message['type'] == 'get_tensor':
                 if client_id in draft_tokens_dict:
+                    if self.stats:
+                        print(client_id)
                     draft_tokens = draft_tokens_dict[client_id]
                     draft_tokens = draft_tokens.to("cuda:0")
                     target_forward_time = time.time()
