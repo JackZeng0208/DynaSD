@@ -53,6 +53,7 @@ class hetero_speculative_decoding:
             random_seed (int, optional): random seed. Defaults to 1234.
             client_id (str, optional): client ID. Defaults to None.
         """
+        draft_model.to('cuda:0')
         seq_len = input_ids.shape[1]
         T = seq_len + max_len
         approx_model_cache = KVCacheModel(
@@ -123,13 +124,10 @@ class hetero_speculative_decoding:
             input_ids = torch.cat((input_ids, t), dim=1)
 
         if self.stats:
-            print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {
-                  accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
+            print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
         end_time = time.time()
-        print(f'total time spend on heterogeneous speculative decoding: {
-              end_time - start_time}')
-        print(f"Token Generation Speed (with speculative decoding): {
-              max_len / (end_time - start_time)} tokens/s")
+        print(f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
+        print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
         print(f"Acceptance Rate: {accepted_count / max_len}")
         approx_model_cache.clear_cache()
         return input_ids
@@ -147,6 +145,7 @@ class hetero_speculative_decoding:
         return target_model_history
 
     def server_speculative_decoding(self, socket, target_model: torch.nn.Module):
+        target_model.to('cuda:0')
         while True:
             message = socket.recv_pyobj()
             if message['type'] == 'send_tensor':
