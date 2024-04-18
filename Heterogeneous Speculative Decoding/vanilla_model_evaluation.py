@@ -3,7 +3,8 @@ from tqdm import tqdm
 from collections import Counter
 import re
 import string
-from vllm import LLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import time
 
 # generation_config = GenerationConfig(
 #     max_length = 100
@@ -51,14 +52,15 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
         scores_for_ground_truths.append(score)
     return max(scores_for_ground_truths)
 
-def evaluate(model, dataset):
+def evaluate(model, tokenizer, dataset):
     f1 = exact_match = total = 0
     for example in tqdm(dataset):
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
-        pred_answer = model.generate(input_str)
+        input_ids = tokenizer.encode(input_str, return_tensors="pt").to("cuda:0")
+        pred_answer = model.generate(input_ids, max_length = 50)
         # print(pred_answer)
-        pred_answer = pred_answer[0].outputs[0].text.strip()
+        pred_answer = tokenizer.decode(pred_answer[0], skip_special_tokens=True)
         ground_truths = example["answer"]["aliases"]
         exact_match += metric_max_over_ground_truths(exact_match_score, pred_answer, ground_truths)
         f1 += metric_max_over_ground_truths(f1_score, pred_answer, ground_truths)
@@ -69,16 +71,15 @@ def evaluate(model, dataset):
 
 # Load the TriviaQA dataset
 dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
-dataset = dataset['validation']
+dataset = dataset['validation'].select(range(1000))
 
-model = LLM(
-    "meta-llama/Llama-2-7b-chat-hf",
-    max_context_len_to_capture=256,
-    tensor_parallel_size=2,
-    tokenizer="meta-llama/Llama-2-7b-chat-hf"
-)
+model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", torch_dtype="auto").to("cuda:0")
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 
-eval_result = evaluate(model, dataset)
+start_time = time.time()
+eval_result = evaluate(model, tokenizer,  dataset)
+end_time = time.time()
 
 with open("eval_result_vllm_llama_triviaQA.txt", 'w') as f:
     f.write(f"Test results: {eval_result}\n")
+    f.write(f"Time taken: {end_time - start_time} seconds\n")
