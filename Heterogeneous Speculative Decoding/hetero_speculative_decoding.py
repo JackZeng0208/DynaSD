@@ -1,5 +1,4 @@
 import torch
-import threading
 import time
 import zmq
 from utils import sample, norm_logits, max_fn, KVCacheModel
@@ -15,7 +14,6 @@ class hetero_speculative_decoding:
         self.time_spend_on_draft_model_generation = 0
         self.time_spend_on_target_model_forward = 0
         self.stats = stats
-        self.tensor_lock = threading.Lock()
 
     def get_time_spend_on_draft_model_generation(self):
         return self.time_spend_on_draft_model_generation
@@ -78,9 +76,7 @@ class hetero_speculative_decoding:
 
             send_tensor_start_time = time.time()
             socket.send_pyobj(
-                {'type': 'send_tensor', 'draft_tokens': draft_tokens, 'client_id': client_id})
-
-            socket.send_pyobj({'type': 'get_tensor', 'client_id': client_id})
+                {'draft_tokens': draft_tokens, 'client_id': client_id})
             target_model_mesg_dict = socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
@@ -161,28 +157,20 @@ class hetero_speculative_decoding:
         while True:
             message = socket.recv_pyobj()
             client_id = message['client_id']
-            if message['type'] == 'send_tensor':
-                received_draft_tokens = message['draft_tokens']
-                draft_tokens_dict[client_id] = received_draft_tokens
-                socket.send_pyobj({'message': f'server received tokens from client {client_id}', 'client_id': client_id})
-            elif message['type'] == 'get_tensor':
-                if client_id in draft_tokens_dict:
-                    if self.stats:
-                        print(client_id)
-                    draft_tokens = draft_tokens_dict[client_id]
-                    draft_tokens = draft_tokens.to("cuda:0")
-                    target_forward_time = time.time()
-                    target_model_history_tensor = self.sampling_without_kvcache(
-                        draft_tokens=draft_tokens,
-                        target_model=target_model
-                    )
-                    finish_target_forward_time = time.time()
-                    draft_tokens_dict[client_id] = None
-                    response = {
-                        'target_prob_hist': target_model_history_tensor,
-                        'target_model_generation_time': finish_target_forward_time - target_forward_time,
-                        'client_id': client_id
-                    }
-                else:
-                    response = {'target_prob_hist': None, 'client_id': client_id}
-                socket.send_pyobj(response)
+            received_draft_tokens = message['draft_tokens']
+            draft_tokens_dict[client_id] = received_draft_tokens
+            draft_tokens = draft_tokens_dict[client_id]
+            draft_tokens = draft_tokens.to("cuda:0")
+            target_forward_time = time.time()
+            target_model_history_tensor = self.sampling_without_kvcache(
+                draft_tokens=draft_tokens,
+                target_model=target_model
+            )
+            finish_target_forward_time = time.time()
+            draft_tokens_dict[client_id] = None
+            response = {
+                'target_prob_hist': target_model_history_tensor,
+                'target_model_generation_time': finish_target_forward_time - target_forward_time,
+                'client_id': client_id
+            }
+            socket.send_pyobj(response)
