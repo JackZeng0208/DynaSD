@@ -1,4 +1,5 @@
 import torch
+import threading
 import time
 import zmq
 from utils import sample, norm_logits, max_fn, KVCacheModel
@@ -14,6 +15,7 @@ class hetero_speculative_decoding:
         self.time_spend_on_draft_model_generation = 0
         self.time_spend_on_target_model_forward = 0
         self.stats = stats
+        self.tensor_lock = threading.Lock()
 
     def get_time_spend_on_draft_model_generation(self):
         return self.time_spend_on_draft_model_generation
