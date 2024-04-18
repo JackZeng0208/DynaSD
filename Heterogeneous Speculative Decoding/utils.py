@@ -1,9 +1,9 @@
 import torch
 from torch.nn import functional as F
 
+
 def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0):
     """
-
     Args:
         logits (torch.Tensorpe_): 2D tensor with shape (batch, vocab)
         top_k (int, optional): top_k. Defaults to 0.
@@ -26,6 +26,8 @@ def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0)
         logits[indices_to_remove] = float('-inf')
     return logits
 
+def entropy(inputs: torch.Tensor):
+    return torch.sum(-inputs * torch.log(inputs)).item()
 
 def norm_logits(logits : torch.Tensor, temperature : float, top_k : float, top_p : float) -> torch.Tensor:
     """

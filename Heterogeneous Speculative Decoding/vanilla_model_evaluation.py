@@ -5,11 +5,11 @@ import re
 import string
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
-
+import GPUtil
 # generation_config = GenerationConfig(
 #     max_length = 100
 #     )
-
+gpu_utilization_records = []
 # Copy from TriviaQA Evaluation Code
 # https://github.com/mandarjoshi90/triviaqa/blob/master/evaluation/triviaqa_evaluation.py
 def normalize_answer(s):
@@ -59,6 +59,8 @@ def evaluate(model, tokenizer, dataset):
         input_str = f"Question: {question}\nAnswer:"
         input_ids = tokenizer.encode(input_str, return_tensors="pt").to("cuda:0")
         pred_answer = model.generate(input_ids, max_length = 50)
+        gpu_utilization = GPUtil.getGPUs()[0]
+        gpu_utilization_records.append(gpu_utilization)
         # print(pred_answer)
         pred_answer = tokenizer.decode(pred_answer[0], skip_special_tokens=True)
         ground_truths = example["answer"]["aliases"]
