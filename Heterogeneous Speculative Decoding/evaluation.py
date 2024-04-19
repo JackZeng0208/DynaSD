@@ -49,7 +49,7 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
         scores_for_ground_truths.append(score)
     return max(scores_for_ground_truths)
 
-def evaluate(dataset, model_name, server_ip, client_id):
+def evaluate(dataset, model_name, server_ip, port, client_id):
     f1 = exact_match = total = 0
     approx_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True)
     approx_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
@@ -64,6 +64,7 @@ def evaluate(dataset, model_name, server_ip, client_id):
             input_ids=input_ids,
             draft_model=approx_model,
             server_ip=server_ip,
+            port=port,
             max_len=50,
             gamma=4,
             client_id=client_id
@@ -87,6 +88,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa", help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
     parser.add_argument("--range", nargs=2, type=int, default=[0, 1000], help="Range of dataset to evaluate")
     parser.add_argument("--server_ip", type=str, default="192.168.0.132")
+    parser.add_argument("--port", type=str, default="1919", help="Server port number")
     parser.add_argument("--client_id", type=str, default=os.getlogin(), help="Client ID")
     parser.add_argument("--max_len", type=int, default=128)
     parser.add_argument("--gamma", type=int, default=4)
@@ -97,6 +99,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dataset = load_dataset(args.dataset, "rc.nocontext")
     dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
-    eval_result = evaluate(dataset, args.model_name, args.server_ip, args.client_id)
+    eval_result = evaluate(dataset, args.model_name, args.server_ip, args.port, args.client_id)
     with open("eval_result_speculative_decoding_triviaQA.txt", 'w') as f:
         f.write(f"Test results: {eval_result}\n")
