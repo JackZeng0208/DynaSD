@@ -11,6 +11,7 @@ if __name__ == '__main__':
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa", help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
     parser.add_argument("--range", nargs=2, type=int, default=[0, 1000], help="Range of dataset to evaluate")
     parser.add_argument("--server_ip", type=str, default="192.168.0.132")
+    parser.add_argument("--port", type=str, default="1919", help="Server port number")
     parser.add_argument("--client_id", type=str, default=os.getlogin(), help="Client ID")
     parser.add_argument("--max_len", type=int, default=128)
     parser.add_argument("--gamma", type=int, default=4)
@@ -22,7 +23,6 @@ if __name__ == '__main__':
     draft_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype="auto", trust_remote_code=True)
     draft_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     client = hetero_speculative_decoding()
-    SERVER_IP = '192.168.0.132'
     client_id = input("Please enter the client ID: ")
     input_ids = draft_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
     top_k = 20
@@ -30,7 +30,8 @@ if __name__ == '__main__':
     output = client.edge_speculative_decoding(
         input_ids=input_ids,
         draft_model=draft_model,
-        server_ip=SERVER_IP,
+        server_ip=args.server_ip,
+        port=args.port,
         max_len=128,
         gamma=4,
         client_id=client_id
