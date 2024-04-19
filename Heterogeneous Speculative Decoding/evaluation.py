@@ -49,9 +49,11 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
         scores_for_ground_truths.append(score)
     return max(scores_for_ground_truths)
 
-def evaluate(dataset, approx_model, SERVER_IP,client_id):
+def evaluate(dataset, model_name, server_ip, client_id):
     f1 = exact_match = total = 0
-    approx_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
+    approx_model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, trust_remote_code=True)
+    approx_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    approx_model.to('cuda:0')
     client = hetero_speculative_decoding()
     for example in tqdm(dataset):
         question = example["question"]
@@ -61,7 +63,7 @@ def evaluate(dataset, approx_model, SERVER_IP,client_id):
         output = client.edge_speculative_decoding(
             input_ids=input_ids,
             draft_model=approx_model,
-            server_ip=SERVER_IP,
+            server_ip=server_ip,
             max_len=50,
             gamma=4,
             client_id=client_id
@@ -78,26 +80,23 @@ def evaluate(dataset, approx_model, SERVER_IP,client_id):
     return {'exact_match': exact_match, 'f1': f1}
 
 if __name__ == "__main__":
-    # parser = argparse.ArgumentParser(
-    #     "Heterogeneous Speculative Decoding Evaluation")
-    # parser.add_argument("--model_name", type=str,
-    #                     default="TinyLlama/TinyLlama-1.1B-Chat-v1.0", help="Draft model name")
-    # parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa", help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
-    # parser.add_argument("--range", nargs=2, type=int, default=[0, 1000], help="Range of dataset to evaluate")
-    # parser.add_argument("--server_ip", type=str, default="192.168.0.132")
-    # parser.add_argument("--client_id", type=str, default=os.getlogin(), help="Client ID")
-    # parser.add_argument("--max_len", type=int, default=128)
-    # parser.add_argument("--gamma", type=int, default=4)
-    # parser.add_argument("--top_k", type=int, default=20)
-    # parser.add_argument("--top_p", type=float, default=0.9)
-    # parser.add_argument("--input_text", type=str,
-    #                     default="Please write an introduction about UC Irvine:")
-    # args = parser.parse_args()
-    approx_model = AutoModelForCausalLM.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", torch_dtype=torch.float16, trust_remote_code=True)
-    approx_model.to('cuda:0')
-    SERVER_IP = '192.168.0.132'
-    dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
-    dataset = dataset['validation'].select(range(1000))
-    eval_result = evaluate(dataset, approx_model, SERVER_IP=SERVER_IP, client_id="1")
+    parser = argparse.ArgumentParser(
+        "Heterogeneous Speculative Decoding Evaluation")
+    parser.add_argument("--model_name", type=str,
+                        default="TinyLlama/TinyLlama-1.1B-Chat-v1.0", help="Draft model name")
+    parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa", help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
+    parser.add_argument("--range", nargs=2, type=int, default=[0, 1000], help="Range of dataset to evaluate")
+    parser.add_argument("--server_ip", type=str, default="192.168.0.132")
+    parser.add_argument("--client_id", type=str, default=os.getlogin(), help="Client ID")
+    parser.add_argument("--max_len", type=int, default=128)
+    parser.add_argument("--gamma", type=int, default=4)
+    parser.add_argument("--top_k", type=int, default=20)
+    parser.add_argument("--top_p", type=float, default=0.9)
+    parser.add_argument("--input_text", type=str,
+                        default="Please write an introduction about UC Irvine:")
+    args = parser.parse_args()
+    dataset = load_dataset(args.dataset, "rc.nocontext")
+    dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
+    eval_result = evaluate(dataset, args.model_name, args.server_ip, args.client_id)
     with open("eval_result_speculative_decoding_triviaQA.txt", 'w') as f:
         f.write(f"Test results: {eval_result}\n")
