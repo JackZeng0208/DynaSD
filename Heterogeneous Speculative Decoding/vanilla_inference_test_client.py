@@ -14,9 +14,9 @@ def send_request(user_id, start_index, end_index):
     for index in range(start_index, end_index):
         example = dataset[index]
         question = example["question"]
-        socket.send_string(question)
+        socket.send_pyobj(question)
 
-        response = socket.recv_json()
+        response = socket.recv_pyobj()
         inference_time = response["inference_time"]
         exact_match = response["exact_match"]
         f1 = response["f1"]
@@ -27,7 +27,8 @@ def send_request(user_id, start_index, end_index):
         print(f"F1 Score: {f1}")
         print()
 
-        time.sleep(1)  # Delay between each question
+        # Set a delay between different users' requests
+        time.sleep(1)  
 
 num_users = 5
 examples_per_user = len(dataset) // num_users
