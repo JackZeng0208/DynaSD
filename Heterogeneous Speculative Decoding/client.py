@@ -23,7 +23,6 @@ if __name__ == '__main__':
     draft_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype="auto", trust_remote_code=True)
     draft_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     client = hetero_speculative_decoding()
-    client_id = input("Please enter the client ID: ")
     input_ids = draft_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
     top_k = 20
     top_p = 0.9
@@ -34,7 +33,7 @@ if __name__ == '__main__':
         port=args.port,
         max_len=128,
         gamma=4,
-        client_id=client_id
+        client_id=args.client_id
     )
     print(f'total time on communication: {client.get_time_spend_sending_message()}')
     print(f'total time on target model forward: {client.get_time_spend_on_target_model_forward()}')
