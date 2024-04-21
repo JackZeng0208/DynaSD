@@ -9,7 +9,7 @@ dataset = dataset['validation'].select(range(1000))
 def send_request(user_id, start_index, end_index):
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
-    socket.connect("tcp://localhost:12345")
+    socket.connect("tcp://192.168.0.132:1919")
 
     for index in range(start_index, end_index):
         example = dataset[index]
