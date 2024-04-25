@@ -2,8 +2,10 @@ import torch
 import time
 import zmq
 from utils import sample, norm_logits, max_fn, KVCacheModel
-
-
+import pynvml
+import threading
+import csv
+pynvml.nvmlInit()
 class hetero_speculative_decoding:
     def __init__(self, stats: bool = False):
         """
@@ -28,7 +30,6 @@ class hetero_speculative_decoding:
                                   input_ids: torch.Tensor,
                                   draft_model: torch.nn.Module,
                                   server_ip: str,
-                                  port: str,
                                   max_len: int,
                                   gamma: int = 4,
                                   temperature: float = 1,
@@ -40,12 +41,12 @@ class hetero_speculative_decoding:
             input_ids (torch.Tensor): input tensor
             draft_model (torch.nn.Module): draft model for speculative decoding
             server_ip (str): server IP
-            port (str): port number
-            max_len (int): maximum length of token generation
+            max_len (int): maximum length of token generation 
             gamma (int, optional): gamma. Defaults to 4.
             temperature (float, optional): temperature. Defaults to 1.
             top_k (int, optional): top k. Defaults to 0.
             top_p (float, optional): top p. Defaults to 0.
+            random_seed (int, optional): random seed. Defaults to 1234.
             client_id (str, optional): client ID. Defaults to None.
         """
         draft_model.to('cuda:0')
@@ -63,7 +64,7 @@ class hetero_speculative_decoding:
 
         context = zmq.Context()
         socket = context.socket(zmq.REQ)
-        socket.connect(f"tcp://{server_ip}:{port}")
+        socket.connect(f"tcp://{server_ip}:1919")
 
         while input_ids.shape[1] < T:
             prefix_len = input_ids.shape[1]
@@ -78,7 +79,9 @@ class hetero_speculative_decoding:
             # Send draft tokens to server
             send_tensor_start_time = time.time()
             socket.send_pyobj(
-                {'draft_tokens': draft_tokens, 'client_id': client_id})
+                {'draft_tokens': draft_tokens, 
+                 'client_id': client_id
+                 })
             target_model_mesg_dict = socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
@@ -141,6 +144,7 @@ class hetero_speculative_decoding:
             temperature (float, optional): Defaults to 1.
             top_k (int, optional): Defaults to 0.
             top_p (float, optional): Defaults to 0.
+            random_seed (int, optional): Defaults to 1234.
         """
         target_model_history = target_model(draft_tokens).logits
         for i in range(target_model_history.shape[-2]):
@@ -153,7 +157,9 @@ class hetero_speculative_decoding:
                                     target_model: torch.nn.Module,
                                     temperature: float = 1,
                                     top_k: int = 0,
-                                    top_p: float = 0):
+                                    top_p: float = 0,
+                                    random_seed: int = 1234
+                                    ):
         """
         Args:
             socket (zmq.Socket): zmq socket object used for communication
@@ -162,26 +168,54 @@ class hetero_speculative_decoding:
         draft_tokens_dict = {}
         draft_tokens = None
         target_model.to("cuda:0")
-        while True:
-            message = socket.recv_pyobj()
-            client_id = message['client_id']
-            received_draft_tokens = message['draft_tokens']
-            draft_tokens_dict[client_id] = received_draft_tokens
-            draft_tokens = draft_tokens_dict[client_id]
-            draft_tokens = draft_tokens.to("cuda:0")
-            target_forward_time = time.time()
-            target_model_history_tensor = self.sampling_without_kvcache(
-                draft_tokens=draft_tokens,
-                target_model=target_model,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-            )
-            finish_target_forward_time = time.time()
-            draft_tokens_dict[client_id] = None
-            response = {
-                'target_prob_hist': target_model_history_tensor,
-                'target_model_generation_time': finish_target_forward_time - target_forward_time,
-                'client_id': client_id
-            }
-            socket.send_pyobj(response)
+
+        active_clients = set()
+        terminated_clients = set()
+        
+        device = torch.device("cuda:0")
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
+        with open(f"gpu_utilization.csv", mode='w', newline='') as file:
+            writer = csv.writer(file)     
+            while True:
+                gpu_utilization = []
+                def capture_gpu_utilization(stop_event):
+                    # Adjust the sample interval as needed (in seconds) -> 1ms
+                    sample_interval = 0.01
+                    while not stop_event.is_set():
+                        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        gpu_utilization.append(utilization)
+                        time.sleep(sample_interval)
+
+                # Start capturing GPU utilization in a separate thread
+                stop_event = threading.Event()
+                gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                gpu_thread.start()
+                
+                message = socket.recv_pyobj()
+                client_id = message['client_id']
+                received_draft_tokens = message['draft_tokens']
+                draft_tokens_dict[client_id] = received_draft_tokens
+                draft_tokens = draft_tokens_dict[client_id]
+                draft_tokens = draft_tokens.to("cuda:0")
+                
+                target_forward_time = time.time()
+                target_model_history_tensor = self.sampling_without_kvcache(
+                    draft_tokens=draft_tokens,
+                    target_model=target_model,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                )
+                finish_target_forward_time = time.time()
+                draft_tokens_dict[client_id] = None
+                response = {
+                    'target_prob_hist': target_model_history_tensor,
+                    'target_model_generation_time': finish_target_forward_time - target_forward_time,
+                    'client_id': client_id,
+                }
+                socket.send_pyobj(response)
+                # Stop capturing GPU utilization
+                stop_event.set()
+                gpu_thread.join()
+                print(gpu_utilization)
+                writer.writerow(gpu_utilization)
