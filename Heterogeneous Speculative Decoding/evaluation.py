@@ -58,6 +58,9 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     client = hetero_speculative_decoding()
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
+    # Set send buffer size to 1 MB
+    socket.setsockopt(zmq.SNDBUF, 1024 * 1024)
+    socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
     socket.connect(f"tcp://{server_ip}:{port}")
     for example in tqdm(dataset):
         question = example["question"]

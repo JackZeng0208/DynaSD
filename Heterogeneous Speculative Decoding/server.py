@@ -15,6 +15,9 @@ if __name__ == "__main__":
     target_model = AutoModelForCausalLM.from_pretrained(args.model_name, torch_dtype="auto", trust_remote_code=True)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
+    # Set send buffer size to 1 MB
+    socket.setsockopt(zmq.SNDBUF, 1024 * 1024)
+    socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
     socket.bind(f"tcp://*:{args.port}")
     print("Server is running...")
     server.server_speculative_decoding(socket, target_model)
