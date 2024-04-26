@@ -22,8 +22,14 @@ if __name__ == '__main__':
     parser.add_argument("--input_text", type=str,
                         default="Please write an introduction about UC Irvine:")
     args = parser.parse_args()
-
-    draft_model = LlamaForCausalLM.from_pretrained(args.model_name, torch_dtype="auto", trust_remote_code=True)
+    draft_model = LlamaForCausalLM.from_pretrained(
+        args.model_name,
+        torch_dtype=torch.float16,
+        # load_in_8bit = True,
+        device_map=0,
+        use_flash_attention_2= False,
+    )
+    # draft_model = LlamaForCausalLM.from_pretrained(args.model_name, torch_dtype="auto", trust_remote_code=True)
     draft_tokenizer = AutoTokenizer.from_pretrained("TinyLlama/TinyLlama-1.1B-Chat-v1.0", trust_remote_code=True)
     client = hetero_speculative_decoding()
     input_ids = draft_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
@@ -42,7 +48,8 @@ if __name__ == '__main__':
         draft_model=draft_model,
         input_ids= input_ids,
         server_ip=args.server_ip,
-        client_id= args.client_id)
+        client_id= args.client_id,
+        max_len= 120)
         
     print(f'total time on communication: {client.get_time_spend_sending_message()}')
     print(f'total time on target model forward: {client.get_time_spend_on_target_model_forward()}')

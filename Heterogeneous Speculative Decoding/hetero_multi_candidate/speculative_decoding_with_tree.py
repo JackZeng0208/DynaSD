@@ -2,9 +2,50 @@ import torch
 import time
 import zmq
 from utils import sample, norm_logits, max_fn, KVCacheModel
-
+from typing import Callable, List, Literal, Optional, Tuple, Union
 from dataclasses import dataclass
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
+
+def get_tree_attn_self_mask(k_config: Tuple[int]):
+    k_config = torch.tensor(k_config, dtype=torch.int)
+    prod_size = torch.cumprod(k_config, dim=0)
+    mask_size = prod_size.sum().item()
+    attn_mask = torch.zeros((mask_size, mask_size), dtype=torch.bool)
+    attn_mask = attn_mask.diagonal_scatter(torch.ones(mask_size))
+    # run BFS
+    idx_queue = [
+        (0, None, idx) for idx in list(range(k_config[0]))
+    ]  # each node: (depth, parent, idx)
+    while len(idx_queue) != 0:
+        depth, parent, idx = idx_queue.pop(0)
+        if parent is not None:
+            attn_mask[idx, : parent + 1] = attn_mask[parent, : parent + 1]
+
+        if depth != len(k_config) - 1:
+            idx_base = prod_size[:depth].sum().item()
+            child_idx_base = prod_size[: depth + 1].sum().item()
+            for child_idx_bias in range(k_config[depth + 1]):
+                real_child_idx = (
+                    (idx - idx_base) * k_config[depth + 1]
+                    + child_idx_base
+                    + child_idx_bias
+                )
+                idx_queue.append((depth + 1, idx, real_child_idx))
+    return attn_mask
+
+def find_longest_list_index(nested_list):
+    """ 
+    may need to use torch alternative for optimization
+    """
+    longest_length = 0
+    longest_index = None
+    
+    for index, lst in enumerate(nested_list):
+        if len(lst) > longest_length:
+            longest_length = len(lst)
+            longest_index = index
+    
+    return longest_index
 
 @dataclass
 class DecoderOnlyDraftOutput(ModelOutput):
@@ -100,6 +141,7 @@ class hetero_speculative_decoding:
             output = edge_draft_generator.generate_draft_naive_tree_attn(
                 input_ids=input_ids,
                 past_key_values= edge_draft_generator.draft_model_past_key_values,
+                draft_model=draft_model
             )
             draft_generate_end_time = time.time()
 
@@ -570,7 +612,9 @@ class Edge_side_tree_strategy_generation:
                 ):
         # assume the model is on device
         self.use_tree_trunction = use_tree_trunction
+        # print("type of draft_model is ", type(draft_model))
         self.draft_model = draft_model,
+        # print("type of self.draft_model is ", type(self.draft_model))
         self.draft_model_temp = draft_model_temp
         self.draft_model_device = draft_model.model.get_input_embeddings().weight.device
 
@@ -591,11 +635,11 @@ class Edge_side_tree_strategy_generation:
     def update_kv_cache(self,indices):
         if self.draft_model_past_key_values != None:
             for i in range(len(self.draft_model_past_key_values)):
-                draft_model_past_key_values[i] = (
-                    draft_model_past_key_values[i][0].index_select(
+                self.draft_model_past_key_values[i] = (
+                    self.draft_model_past_key_values[i][0].index_select(
                         dim=2, index=indices
                     ),
-                    draft_model_past_key_values[i][1].index_select(
+                    self.draft_model_past_key_values[i][1].index_select(
                         dim=2, index=indices
                     ),
                 )
@@ -605,19 +649,22 @@ class Edge_side_tree_strategy_generation:
         self,
         input_ids, # already in device from its caller
         past_key_values, # for kv cache 
+        draft_model,
+        
     ):
         pass
         cand_probs = []
         step_tree_attn_mask = None
         position_ids = None
         init_input_length = input_ids.size(1)
-        max_draft_len = len(tree_config)
+        max_draft_len = len(self.tree_config)
 
         if past_key_values is not None:
             pruned_input_ids = input_ids[:, past_key_values[0][0].size(2) :]
         else:
             pruned_input_ids = input_ids
         for step in range(max_draft_len):
+            step_k = self.tree_config[step]
             if step != 0:
                 step_tree_attn_self_mask = self.tree_attn_self_mask[
                     self.cumulative_prod_size[step - 1] : self.cumulative_prod_size[
@@ -637,7 +684,8 @@ class Edge_side_tree_strategy_generation:
                 step_tree_attn_mask = torch.cat(
                     (context_attn_mask, step_tree_attn_self_mask), dim=1
                 )
-            outputs: BaseModelOutputWithPast = self.draft_model.model(
+            # print(f"line 682 type of draft_model is {type(self.draft_model)}")
+            outputs: BaseModelOutputWithPast = draft_model.model(
                 input_ids=pruned_input_ids,
                 use_cache=True,
                 past_key_values=past_key_values,
@@ -653,7 +701,7 @@ class Edge_side_tree_strategy_generation:
                 hidden_states = hidden_states[0, -1:]
             else:
                 hidden_states = hidden_states[0]
-            logits = self.draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
+            logits = draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
 
             past_key_values = list(outputs.past_key_values)
             ## TODO: not sure if I can update kv like this 
