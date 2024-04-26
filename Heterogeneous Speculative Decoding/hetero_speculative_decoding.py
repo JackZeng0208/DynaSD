@@ -29,7 +29,7 @@ class hetero_speculative_decoding:
     def edge_speculative_decoding(self,
                                   input_ids: torch.Tensor,
                                   draft_model: torch.nn.Module,
-                                  server_ip: str,
+                                  client_socket: zmq.Socket,
                                   max_len: int,
                                   gamma: int = 4,
                                   temperature: float = 1,
@@ -62,10 +62,6 @@ class hetero_speculative_decoding:
         start_time = time.time()
         draft_tokens = None
 
-        context = zmq.Context()
-        socket = context.socket(zmq.REQ)
-        socket.connect(f"tcp://{server_ip}:1919")
-
         while input_ids.shape[1] < T:
             prefix_len = input_ids.shape[1]
 
@@ -78,11 +74,11 @@ class hetero_speculative_decoding:
 
             # Send draft tokens to server
             send_tensor_start_time = time.time()
-            socket.send_pyobj(
+            client_socket.send_pyobj(
                 {'draft_tokens': draft_tokens, 
                  'client_id': client_id
                  })
-            target_model_mesg_dict = socket.recv_pyobj()
+            target_model_mesg_dict = client_socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
             target_model_history = target_model_mesg_dict['target_prob_hist']

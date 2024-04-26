@@ -8,6 +8,7 @@ from hetero_speculative_decoding import hetero_speculative_decoding
 import argparse
 import os
 import torch
+import zmq
 
 def normalize_answer(s):
     """Lower text and remove punctuation, articles and extra whitespace."""
@@ -55,6 +56,9 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     approx_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     approx_model.to('cuda:0')
     client = hetero_speculative_decoding()
+    context = zmq.Context()
+    socket = context.socket(zmq.REQ)
+    socket.connect(f"tcp://{server_ip}:{port}")
     for example in tqdm(dataset):
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
@@ -63,8 +67,7 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
         output = client.edge_speculative_decoding(
             input_ids=input_ids,
             draft_model=approx_model,
-            server_ip=server_ip,
-            port=port,
+            client_socket=socket,
             max_len=50,
             gamma=4,
             client_id=client_id
