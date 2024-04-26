@@ -216,6 +216,7 @@ class hetero_speculative_decoding:
             received_draft_tokens = message['draft_tokens']
             # print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
 
+            print(f"received token from edge {received_draft_tokens}")
             cand_probs = message['cand_probs']
             draft_tree_config = message['tree_config']
             draft_tokens_dict[client_id] = received_draft_tokens
@@ -224,15 +225,14 @@ class hetero_speculative_decoding:
 
             draft_tokens = draft_tokens.to(server_verifier.target_model_device)
             target_forward_time = time.time()
-            target_logits = server_verifier.target_forward(draft_tokens)
+            target_logits = server_verifier.target_forward(draft_tokens, tree_config =draft_tree_config )
             finish_target_forward_time = time.time()
 
             verification_time = time.time()
             output = server_verifier.verify_longest_candidate_hetero(
                 input_ids=draft_tokens,
                 cand_probs=cand_probs,
-                logits=target_logits,
-                tree_config= draft_tree_config)
+                logits=target_logits,)
             end_verification_time = time.time()
             
             new_tokens = output.sequences
@@ -425,8 +425,29 @@ class Server_side_verification:
         self.target_model = target_model
         self.target_model_temp = target_model_temp
         self.target_model_device = target_model.model.get_input_embeddings().weight.device
+        
+    def new_verification(self,
+        ground_probs: torch.FloatTensor,
+        cand_probs: Tuple[torch.FloatTensor],
+        cand_tokens: torch.LongTensor,
+    ) -> Optional[int]:
+        accepted_indices = []
+        cand_probs = cand_probs.to(ground_probs.device)
+        for check_idx, cand_token in enumerate(cand_tokens):
+            accept_threshold = ground_probs[cand_token] / cand_probs[cand_token]
+            if torch.rand(1, device=accept_threshold.device) <= accept_threshold:
+                accepted_indices.append(check_idx)
+            else:
+                ground_probs -= cand_probs
+                ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
+                ground_probs /= ground_probs.sum()
+        return accepted_indices
     
-    def target_forward(self,input_ids):
+    def target_forward(self,input_ids,
+                       tree_config):
+        self.tree_config = tree_config
+        self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
+            device=self.target_model_device)
         input_ids = input_ids.to(self.target_model_device)
         tree_attn_len = self.tree_attn_self_mask.size(0)
         init_input_length = input_ids.size(1) - tree_attn_len
@@ -468,12 +489,13 @@ class Server_side_verification:
         input_ids: torch.LongTensor,        
         cand_probs: Optional[Tuple[torch.FloatTensor]],
         logits,
-        tree_config: Tuple = (2,2,1) 
     ) -> DecoderOnlyVerificationOutput:
-
+        """
+        1. assume target forward is always called before verification 
+        2. therefore the tree_config is initialize in forward
+        """
         ## prepare for heterogeneous 
         self.cand_probs = cand_probs
-        self.tree_config = tree_config
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
@@ -483,8 +505,7 @@ class Server_side_verification:
         self.cumulative_prod_size = torch.cumsum(
             torch.tensor(prod_size), dim=0
         ).tolist()
-        self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
-            device=self.target_model_device)
+        
 
         input_ids = input_ids.to(self.target_model_device)
         # logits, target_model_past_key_values = self._forward_target_model(

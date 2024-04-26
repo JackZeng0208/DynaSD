@@ -91,7 +91,7 @@ for i in tqdm(range(len(sentence_list))):
     draft_token_count += output.draft_token_count
     invocation_count += output.invocation_count
     run_time = end_time - start_time
-    # break
+    break
 latency = run_time / (acceptance_count + invocation_count)
 acceptance_rate = acceptance_count / draft_token_count
 block_efficiency = 1 + acceptance_count / invocation_count
