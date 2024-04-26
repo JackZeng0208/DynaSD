@@ -144,13 +144,15 @@ class hetero_speculative_decoding:
             )
             draft_generate_end_time = time.time()
 
-            draft_tokens, _ , cand_probs, draf_tree_config = output ## naive tree, dynamic tree also need tree_config
+            draft_tokens = output.sequences
+            cand_probs = output.cand_probs
+            draf_tree_config = output.tree_config ## naive tree, dynamic tree also need tree_config
             total_draft_generate_count += len(edge_draft_generator.tree_config)
             self.time_spend_on_draft_model_generation += draft_generate_end_time - \
                 draft_generate_start_time
 
             # Send draft tokens to server
-            print(f"line 155: the type of draft_token before sending should be tensor {draft_tokens}")
+            # print(f"line 155: the type of draft_token before sending should be tensor {draft_tokens}")
             send_tensor_start_time = time.time()
             socket.send_pyobj(
                 {'draft_tokens': draft_tokens, 
@@ -212,13 +214,13 @@ class hetero_speculative_decoding:
             message = socket.recv_pyobj()
             client_id = message['client_id']
             received_draft_tokens = message['draft_tokens']
-            print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
+            # print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
 
             cand_probs = message['cand_probs']
             draft_tree_config = message['tree_config']
             draft_tokens_dict[client_id] = received_draft_tokens
             draft_tokens = draft_tokens_dict[client_id]
-            print(f"line 221: the type of draft_token after dict should be tensor {draft_tokens}")
+            # print(f"line 221: the type of draft_token after dict should be tensor {draft_tokens}")
 
             draft_tokens = draft_tokens.to(server_verifier.target_model_device)
             target_forward_time = time.time()
