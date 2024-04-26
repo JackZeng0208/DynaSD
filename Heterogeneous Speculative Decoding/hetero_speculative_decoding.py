@@ -15,7 +15,6 @@ class hetero_speculative_decoding:
         self.time_spend_sending_message = 0
         self.time_spend_on_draft_model_generation = 0
         self.time_spend_on_target_model_forward = 0
-        self.total_transmission_time = 0
         self.stats = stats
 
     def get_time_spend_on_draft_model_generation(self):
@@ -26,9 +25,6 @@ class hetero_speculative_decoding:
 
     def get_time_spend_sending_message(self):
         return self.time_spend_sending_message
-    
-    def get_total_transmission_time(self):
-        return self.total_transmission_time
     
     def edge_speculative_decoding(self,
                                   input_ids: torch.Tensor,
@@ -68,6 +64,7 @@ class hetero_speculative_decoding:
 
         with open(f"transmission_time_{client_id}.csv", mode='w', newline='') as file:
             writer = csv.writer(file)
+            total_transmission_time = 0
             while input_ids.shape[1] < T:
                 prefix_len = input_ids.shape[1]
                 draft_generate_start_time = time.time()
@@ -86,7 +83,7 @@ class hetero_speculative_decoding:
                 target_model_mesg_dict = client_socket.recv_pyobj()
                 send_tensor_end_time = time.time()
 
-                self.total_transmission_time += send_tensor_end_time - send_tensor_start_time
+                total_transmission_time += (send_tensor_end_time - send_tensor_start_time)
                 target_model_history = target_model_mesg_dict['target_prob_hist']
                 target_model_generation_time = target_model_mesg_dict['target_model_generation_time']
                 total_time_in_server = target_model_generation_time
@@ -122,8 +119,7 @@ class hetero_speculative_decoding:
 
                 input_ids = input_ids.to("cuda:0")
                 input_ids = torch.cat((input_ids, t), dim=1)
-            writer.writerow([self.total_transmission_time])
-            self.total_transmission_time = 0
+            writer.writerow([total_transmission_time])
             if self.stats:
                 print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
             end_time = time.time()
