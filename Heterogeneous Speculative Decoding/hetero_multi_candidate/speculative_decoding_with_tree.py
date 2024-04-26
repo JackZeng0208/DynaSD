@@ -98,7 +98,7 @@ class hetero_speculative_decoding:
         draft_model,
         server_ip,
         max_len,
-        tree_config = (2,2,1),
+        tree_config = (2,2,2,1),
         temperature = 1,
         client_id = ""):
         """
@@ -146,7 +146,7 @@ class hetero_speculative_decoding:
 
             draft_tokens = output.sequences
             cand_probs = output.cand_probs
-            print(f"cand_probs in edge {cand_probs}")
+            # print(f"cand_probs in edge {cand_probs}")
             draf_tree_config = output.tree_config ## naive tree, dynamic tree also need tree_config
             total_draft_generate_count += len(edge_draft_generator.tree_config)
             self.time_spend_on_draft_model_generation += draft_generate_end_time - \
@@ -187,7 +187,6 @@ class hetero_speculative_decoding:
             ex. store prefix tokens in candidate, and cat the new accept tokens. 
             """
             input_ids = new_tokens.to(edge_draft_generator.draft_model_device)
-            print(f"shape of input_ids.shape[1]: {input_ids.shape[1]}")
         if self.stats:
             print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
         end_time = time.time()
@@ -217,7 +216,6 @@ class hetero_speculative_decoding:
             received_draft_tokens = message['draft_tokens']
             # print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
 
-            print(f"received token from edge {received_draft_tokens}")
             cand_probs = message['cand_probs']
             draft_tree_config = message['tree_config']
             draft_tokens_dict[client_id] = received_draft_tokens
@@ -496,7 +494,7 @@ class Server_side_verification:
         """
         ## prepare for heterogeneous 
         self.cand_probs = cand_probs
-        print(f"line 499 what is the shape of cand_probs {cand_probs}")
+        print(f"line 499 what is the tree_config {self.tree_config}")
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
@@ -539,6 +537,7 @@ class Server_side_verification:
             if len(current_ground_prob)  == 0 :
 
                 break 
+        print(f"line 540: total path is {self.total_path}")
         # may want to consider a tie breaker for keep_indices 
         if len(current_ground_prob) == 0:
             tail_ground_prob = init_ground_prob
@@ -565,7 +564,6 @@ class Server_side_verification:
         tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
             device=input_ids.device
         )
-        print(f"debug 329: what is tail_ground_token[None] {tail_ground_token[None]}, and tail_ground_token is {tail_ground_token}")
         input_ids = input_ids.index_select(dim=1, index=keep_indices)
         input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)
 
@@ -692,7 +690,7 @@ class Edge_side_tree_strategy_generation:
         position_ids = None
         init_input_length = input_ids.size(1)
         max_draft_len = len(self.tree_config)
-        print(f"Line 695 what is max_draft_len {max_draft_len}")
+        # print(f"Line 695 what is max_draft_len {max_draft_len}")
 
         if past_key_values is not None:
             pruned_input_ids = input_ids[:, past_key_values[0][0].size(2) :]
