@@ -91,8 +91,6 @@ class hetero_speculative_decoding:
     def get_time_spend_sending_message(self):
         return self.time_spend_sending_message
 
-    
-
     # function contain the communitcation between server and edge
     def edge_tree_attn_speculative_decoding(
         self,
@@ -120,6 +118,7 @@ class hetero_speculative_decoding:
         target_sample_count = 0
         accepted_count = 0
         total_draft_generate_count = 0
+        verification_time = 0
         input_ids = input_ids.to(edge_draft_generator.draft_model_device)
         start_time = time.time()
         draft_tokens = None
@@ -151,6 +150,7 @@ class hetero_speculative_decoding:
                 draft_generate_start_time
 
             # Send draft tokens to server
+            print(f"line 155: the type of draft_token before sending should be tensor {draft_tokens}")
             send_tensor_start_time = time.time()
             socket.send_pyobj(
                 {'draft_tokens': draft_tokens, 
@@ -168,6 +168,7 @@ class hetero_speculative_decoding:
             new_tokens = target_model_mesg_dict['new_tokens'] ## verified token + new token sampled from target
             accepted_indices = target_model_mesg_dict['accepted_indices'] ## to update draft model kv cache
             accepted_count += target_model_mesg_dict['accept_count'] ## update stats
+            verification_time += target_model_mesg_dict['verification_time']
             edge_draft_generator.update_kv_cache(accepted_indices)
             # target_model_history = target_model_mesg_dict['target_prob_hist']
             target_model_generation_time = target_model_mesg_dict['target_model_generation_time']
@@ -190,6 +191,7 @@ class hetero_speculative_decoding:
         print(f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
         print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
         print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
+        print(f"Total verification time is {verification_time}")
         return input_ids
 
     def server_tree_attn_speculative_decoding(
@@ -210,10 +212,14 @@ class hetero_speculative_decoding:
             message = socket.recv_pyobj()
             client_id = message['client_id']
             received_draft_tokens = message['draft_tokens']
+            print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
+
             cand_probs = message['cand_probs']
             draft_tree_config = message['tree_config']
             draft_tokens_dict[client_id] = received_draft_tokens
             draft_tokens = draft_tokens_dict[client_id]
+            print(f"line 221: the type of draft_token after dict should be tensor {draft_tokens}")
+
             draft_tokens = draft_tokens.to(server_verifier.target_model_device)
             target_forward_time = time.time()
             target_logits = server_verifier.target_forward(draft_tokens)
@@ -223,7 +229,9 @@ class hetero_speculative_decoding:
             output = server_verifier.verify_longest_candidate_hetero(
                 input_ids=draft_tokens,
                 cand_probs=cand_probs,
+                logits=target_logits,
                 tree_config= draft_tree_config)
+            end_verification_time = time.time()
             
             new_tokens = output.sequences
             accepted_indices = output.draft_model_accept_indices
@@ -234,7 +242,8 @@ class hetero_speculative_decoding:
                 'accepted_indices': accepted_indices,
                 'accept_count': accept_count,
                 'target_model_generation_time': finish_target_forward_time - target_forward_time,
-                'client_id': client_id
+                'client_id': client_id,
+                'verification_time': end_verification_time - verification_time
             }
             socket.send_pyobj(response)
 
@@ -438,8 +447,6 @@ class Server_side_verification:
 
         outputs: BaseModelOutputWithPast = self.target_model.model(
             input_ids=pruned_input_ids,
-            use_cache=True,
-            past_key_values=past_key_values,
             return_dict=True,
             output_attentions=False,
             output_hidden_states=False,
@@ -458,6 +465,7 @@ class Server_side_verification:
         self,
         input_ids: torch.LongTensor,        
         cand_probs: Optional[Tuple[torch.FloatTensor]],
+        logits,
         tree_config: Tuple = (2,2,1) 
     ) -> DecoderOnlyVerificationOutput:
 
@@ -473,12 +481,14 @@ class Server_side_verification:
         self.cumulative_prod_size = torch.cumsum(
             torch.tensor(prod_size), dim=0
         ).tolist()
+        self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
+            device=self.target_model_device)
 
         input_ids = input_ids.to(self.target_model_device)
-        logits, target_model_past_key_values = self._forward_target_model(
-            input_ids, target_model_past_key_values
-        )
-        logits = logits[0]  # seq_len x hidden_dim
+        # logits, target_model_past_key_values = self._forward_target_model(
+        #     input_ids, target_model_past_key_values
+        # )
+        # logits = logits[0]  # seq_len x hidden_dim
         tree_attn_len = self.tree_attn_self_mask.size(0)
         self.unverified_tokens = input_ids[0, -tree_attn_len:]
         self.init_input_length = input_ids.size(1) - tree_attn_len
