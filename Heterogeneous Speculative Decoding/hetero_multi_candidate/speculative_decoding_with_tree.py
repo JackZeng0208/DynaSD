@@ -140,12 +140,13 @@ class hetero_speculative_decoding:
             output = edge_draft_generator.generate_draft_naive_tree_attn(
                 input_ids=input_ids,
                 past_key_values= edge_draft_generator.draft_model_past_key_values,
-                draft_model=draft_model
+                draft_model=draft_model,
             )
             draft_generate_end_time = time.time()
 
             draft_tokens = output.sequences
             cand_probs = output.cand_probs
+            print(f"cand_probs in edge {cand_probs}")
             draf_tree_config = output.tree_config ## naive tree, dynamic tree also need tree_config
             total_draft_generate_count += len(edge_draft_generator.tree_config)
             self.time_spend_on_draft_model_generation += draft_generate_end_time - \
@@ -248,7 +249,6 @@ class hetero_speculative_decoding:
                 'verification_time': end_verification_time - verification_time
             }
             socket.send_pyobj(response)
-
 
     def edge_speculative_decoding(self,
                                   input_ids: torch.Tensor,
@@ -496,6 +496,7 @@ class Server_side_verification:
         """
         ## prepare for heterogeneous 
         self.cand_probs = cand_probs
+        print(f"line 499 what is the shape of cand_probs {cand_probs}")
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
@@ -511,7 +512,7 @@ class Server_side_verification:
         # logits, target_model_past_key_values = self._forward_target_model(
         #     input_ids, target_model_past_key_values
         # )
-        # logits = logits[0]  # seq_len x hidden_dim
+        logits = logits[0]  # seq_len x hidden_dim
         tree_attn_len = self.tree_attn_self_mask.size(0)
         self.unverified_tokens = input_ids[0, -tree_attn_len:]
         self.init_input_length = input_ids.size(1) - tree_attn_len
@@ -691,6 +692,7 @@ class Edge_side_tree_strategy_generation:
         position_ids = None
         init_input_length = input_ids.size(1)
         max_draft_len = len(self.tree_config)
+        print(f"Line 695 what is max_draft_len {max_draft_len}")
 
         if past_key_values is not None:
             pruned_input_ids = input_ids[:, past_key_values[0][0].size(2) :]
@@ -748,11 +750,11 @@ class Edge_side_tree_strategy_generation:
             pruned_input_ids = cand_tokens
             input_ids = torch.cat((input_ids, pruned_input_ids), dim=1)
             
-            return DecoderOnlyDraftOutput(
-                sequences=input_ids,
-                past_key_values=past_key_values,
-                cand_probs=tuple(cand_probs),
-                tree_config = self.tree_config)
+        return DecoderOnlyDraftOutput(
+            sequences=input_ids,
+            past_key_values=past_key_values,
+            cand_probs=tuple(cand_probs),
+            tree_config = self.tree_config)
 
     def generate_draft_dynamic_tree_attn(
         self
