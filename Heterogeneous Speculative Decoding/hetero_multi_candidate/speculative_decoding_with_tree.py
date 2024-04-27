@@ -620,8 +620,8 @@ class Server_side_verification:
         depth, ):
 
         repeat = 1
-        if depth < self.max_draft_len -1:
-            repeat = self.tree_config[depth +1]
+        last_k = self.prod_size[-1]
+        repeat = int(last_k//self.prod_size[depth+1])
         # print(f"what is self_prod size {self.prod_size}")
         k = self.prod_size[depth+1]
         p = self.cumulative_prod_size[depth +1]

@@ -208,7 +208,7 @@ class TreeStrategy(Strategy):
             replacement,
             speculative_sampling,
         )
-
+        
         prod_size = torch.cumprod(torch.tensor(k_config, dtype=torch.int), dim=0)
         prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
         self.prod_size = prod_size
@@ -521,6 +521,7 @@ class TreeStrategy(Strategy):
         self.tree_config = tree_config
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
+        print(f"what is total_num_path is {self.total_num_path}")
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
         
         prod_size = torch.cumprod(torch.tensor(self.tree_config, dtype=torch.int,device=self.target_model_device), dim=0)
@@ -561,6 +562,8 @@ class TreeStrategy(Strategy):
             if len(current_ground_prob)  == 0 :
 
                 break 
+            
+        print(f"self.total_path: {self.total_path}")
         # may want to consider a tie breaker for keep_indices 
         if len(current_ground_prob) == 0:
             tail_ground_prob = init_ground_prob
@@ -671,8 +674,11 @@ class TreeStrategy(Strategy):
         depth, ):
         repeat = 1
         
-        if depth < self.max_draft_len -1:
-            repeat = self.tree_config[depth +1]
+        # if depth < self.max_draft_len -1:
+        last_k = self.prod_size[-1]
+        # print(f"last_k is {last_k}")
+        repeat = int(last_k//self.prod_size[depth+1])
+        # print(f"repeat for level {depth} is {repeat}")
         # print(f"what is self_prod size {self.prod_size}")
         k = self.prod_size[depth+1]
         p = self.cumulative_prod_size[depth +1]

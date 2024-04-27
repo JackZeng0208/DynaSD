@@ -30,6 +30,7 @@ class SpeculativeGenerator:
         speculative_sampling: bool = True,
         use_origin = False
     ) -> None:
+        self.tree_config = k_config
         self.use_origin = use_origin
         self.eos_token_id = eos_token_id
         self.max_new_tokens = max_new_tokens
@@ -81,7 +82,7 @@ class SpeculativeGenerator:
                     target_model_past_key_values=target_model_past_key_values,
                     draft_model_past_key_values=draft_output.past_key_values,
                     cand_probs=draft_output.cand_probs,
-                    tree_config=(2,2,1)
+                    tree_config=self.tree_config
                 )
 
             input_ids = verification_output.sequences

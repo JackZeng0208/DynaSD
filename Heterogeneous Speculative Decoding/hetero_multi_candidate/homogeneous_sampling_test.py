@@ -30,8 +30,8 @@ draft_model = LlamaForCausalLM.from_pretrained(
 
 target_model = LlamaForCausalLM.from_pretrained(
         target_model_path,
-        # torch_dtype=torch.float16,
-        load_in_8bit = True,
+        torch_dtype=torch.float16,
+        # load_in_8bit = True,
         device_map=0,
         use_flash_attention_2= False,
     )
@@ -52,7 +52,7 @@ sentence_list = ["Write a story set in a post-apocalyptic world where humans are
 
 
 
-k_config_e = (2,2,1)
+k_config_e = (2,2,2,1)
 draft_model_temp=1
 target_model_temp=1
 max_new_tokens = 200
@@ -91,7 +91,7 @@ for i in tqdm(range(len(sentence_list))):
     draft_token_count += output.draft_token_count
     invocation_count += output.invocation_count
     run_time = end_time - start_time
-    break
+    # break
 latency = run_time / (acceptance_count + invocation_count)
 acceptance_rate = acceptance_count / draft_token_count
 block_efficiency = 1 + acceptance_count / invocation_count
