@@ -494,7 +494,7 @@ class Server_side_verification:
         """
         ## prepare for heterogeneous 
         self.cand_probs = cand_probs
-        print(f"line 499 what is the tree_config {self.tree_config}")
+        # print(f"line 499 what is the tree_config {self.tree_config}")
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
@@ -515,6 +515,9 @@ class Server_side_verification:
         self.unverified_tokens = input_ids[0, -tree_attn_len:]
         self.init_input_length = input_ids.size(1) - tree_attn_len
 
+        print('-'*50)
+        print(f"line 518: check for nan distribution, logit is {logits}\nshape of logits {logits.shape}\n")
+        print(f"line 519: check for invalid value in dist, max {torch.max(logits,-1)},\nmin {torch.min(logits,-1)}\n")
         # use sampling no greedy. 
         ground_probs = torch.softmax(logits / self.target_model_temp, dim=-1)
         # print(f"shape of ground_probs {ground_probs.shape}")
@@ -537,10 +540,12 @@ class Server_side_verification:
             if len(current_ground_prob)  == 0 :
 
                 break 
-        print(f"line 540: total path is {self.total_path}")
+        # print(f"line 540: total path is {self.total_path}")
         # may want to consider a tie breaker for keep_indices 
         if len(current_ground_prob) == 0:
+            
             tail_ground_prob = init_ground_prob
+            print(f"***all rejected use initial probs {tail_ground_prob}\n")
             # means all candidate rejected
         else: 
             
@@ -550,6 +555,7 @@ class Server_side_verification:
                 depth = self.max_draft_len
             keep_indices.extend(self.total_path[longest_list_index])
             tail_ground_prob = ground_probs[self.total_path[longest_list_index][-1] - self.init_input_length]
+            print(f"**accepted_some use  probs {tail_ground_prob}\n")
         keep_indices = torch.tensor(
             keep_indices, dtype=torch.long, device=self.target_model_device
         )
@@ -560,7 +566,7 @@ class Server_side_verification:
         else:
             draft_keep_indices = keep_indices
         
-        
+        # tail_ground_prob = torch.softmax(tail_ground_prob,dim=-1)
         tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
             device=input_ids.device
         )
