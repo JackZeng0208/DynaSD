@@ -1,9 +1,11 @@
 import torch
 import time
 import zmq
-from utils import sample, norm_logits, max_fn, KVCacheModel
+from NewUtils import sample, norm_logits, max_fn, KVCacheModel
 from typing import Callable, List, Literal, Optional, Tuple, Union
 from dataclasses import dataclass
+import gc
+from torch.nn import functional as F
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
 def get_tree_attn_self_mask(k_config: Tuple[int]):
@@ -194,7 +196,9 @@ class hetero_speculative_decoding:
         print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
         print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         print(f"Total verification time is {verification_time}")
-        return input_ids
+        del edge_draft_generator.draft_model_past_key_values
+        gc.collect()
+        return input_ids, accepted_count / total_draft_generate_count 
 
     def server_tree_attn_speculative_decoding(
                                     self,
@@ -515,17 +519,19 @@ class Server_side_verification:
         self.unverified_tokens = input_ids[0, -tree_attn_len:]
         self.init_input_length = input_ids.size(1) - tree_attn_len
 
-        print('-'*50)
-        print(f"line 518: check for nan distribution, logit is {logits}\nshape of logits {logits.shape}\n")
-        print(f"line 519: check for invalid value in dist, max {torch.max(logits,-1)},\nmin {torch.min(logits,-1)}\n")
+        # print('-'*50)
+        # print(f"line 518: check for nan distribution, logit is {logits}\nshape of logits {logits.shape}\n")
+        # print(f"line 519: check for invalid value in dist, max {torch.max(logits,-1)},\nmin {torch.min(logits,-1)}\n")
         # use sampling no greedy. 
-        ground_probs = torch.softmax(logits / self.target_model_temp, dim=-1)
+        #TODO: what if there is nan in the ground_prob, how will it affect the verification? 
+        ground_probs = F.softmax(logits / (self.target_model_temp), dim=-1)
         # print(f"shape of ground_probs {ground_probs.shape}")
         keep_indices = list(range(self.init_input_length))
         to_drop_len = 0
 
         current_ground_prob = [ground_probs[0]]
         init_ground_prob = ground_probs[0] # prepare for no candidate accepted
+        tail_ground_index = 0 # prepare for softmax produce nan case, use greedy argmax instead
         ground_probs = ground_probs[1:]
         idx_group_bias = [0]
         cand_probs_idx = [0]
@@ -545,7 +551,7 @@ class Server_side_verification:
         if len(current_ground_prob) == 0:
             
             tail_ground_prob = init_ground_prob
-            print(f"***all rejected use initial probs {tail_ground_prob}\n")
+            # print(f"***all rejected use initial probs {tail_ground_prob}\n")
             # means all candidate rejected
         else: 
             
@@ -554,8 +560,9 @@ class Server_side_verification:
                 to_drop_len= 1
                 depth = self.max_draft_len
             keep_indices.extend(self.total_path[longest_list_index])
-            tail_ground_prob = ground_probs[self.total_path[longest_list_index][-1] - self.init_input_length]
-            print(f"**accepted_some use  probs {tail_ground_prob}\n")
+            tail_ground_index = self.total_path[longest_list_index][-1] - self.init_input_length
+            tail_ground_prob = ground_probs[tail_ground_index]
+            # print(f"**accepted_some use  probs {tail_ground_prob}\n")
         keep_indices = torch.tensor(
             keep_indices, dtype=torch.long, device=self.target_model_device
         )
@@ -567,10 +574,16 @@ class Server_side_verification:
             draft_keep_indices = keep_indices
         
         # tail_ground_prob = torch.softmax(tail_ground_prob,dim=-1)
-        tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
-            device=input_ids.device
-        )
+        if (torch.isnan(tail_ground_prob).any()):
+            tail_ground_token = torch.argmax(logits[tail_ground_index]).to(
+            device=input_ids.device)
+            tail_ground_token = tail_ground_token.unsqueeze(0)
+            print(f"has nan in probs {tail_ground_prob}, and picked token is {tail_ground_token}")
+        else:
+            tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
+                device=input_ids.device)
         input_ids = input_ids.index_select(dim=1, index=keep_indices)
+        # print(f"shape of input_ids {input_ids.shape}, and  tail_ground_token {tail_ground_token}, tail_ground_token[None] {tail_ground_token[None]}")
         input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)
 
         return DecoderOnlyVerificationOutput(
