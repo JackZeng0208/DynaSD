@@ -449,6 +449,7 @@ class ServerSideVerification:
             if torch.rand(1, device=accept_threshold.device) <= accept_threshold:
                 accepted_indices.append(check_idx)
             else:
+                # FIXME: why does this do?
                 ground_probs -= cand_probs
                 ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
                 ground_probs /= ground_probs.sum()
@@ -535,6 +536,7 @@ class ServerSideVerification:
         # print(f"line 519: check for invalid value in dist, max {torch.max(logits,-1)},\nmin {torch.min(logits,-1)}\n")
         # use sampling no greedy.
         # TODO: what if there is nan in the ground_prob, how will it affect the verification?
+        # FIXME: when and why does ground truth probability has nan?
         ground_probs = F.softmax(logits / (self.target_model_temp), dim=-1)
         # print(f"shape of ground_probs {ground_probs.shape}")
         keep_indices = list(range(self.init_input_length))

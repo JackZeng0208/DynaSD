@@ -1,5 +1,6 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer
+
 from tqdm import tqdm
 from collections import Counter
 import re
@@ -83,10 +84,8 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
         output, acceptance_rate = client.edge_tree_attn_speculative_decoding(
             input_ids=input_ids,
             draft_model=approx_model,
-            server_ip=server_ip,
-            client_socket=socket,
-            max_len=50,
-            gamma=4,
+            edge_socket=socket,
+            max_len=128,
             client_id=client_id
         )
         total_acceptace_rate += acceptance_rate

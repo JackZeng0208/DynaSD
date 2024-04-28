@@ -23,12 +23,13 @@ if __name__ == "__main__":
     print(f"what is target device {target_model.device}")
     context = zmq.Context()
     socket = context.socket(zmq.REP)
+    
     # # Set send buffer size to 1 MB
     socket.setsockopt(zmq.SNDBUF, 1024 * 1024)
     socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
     socket.bind(f"tcp://*:{args.port}")
     print("Server is running...")
     server.server_tree_attn_speculative_decoding(
-        socket= socket,
+        server_socket= socket,
         target_model=target_model
     )
