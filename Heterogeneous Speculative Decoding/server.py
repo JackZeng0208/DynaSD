@@ -1,8 +1,9 @@
 import zmq
-from speculative_decoding_with_tree import*
+from hetero_speculative_decoding import HeteroSpeculativeDecoding
 from model.llama_tree_attn import LlamaForCausalLM
 import os
 import argparse
+import torch
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -11,7 +12,7 @@ if __name__ == "__main__":
                         default="meta-llama/Llama-2-7b-chat-hf", help="Target model name")
     parser.add_argument("--port", type=str, default="1919")
     args = parser.parse_args()
-    server = hetero_speculative_decoding()
+    server = HeteroSpeculativeDecoding()
     target_model = LlamaForCausalLM.from_pretrained(
         args.model_name,
         torch_dtype=torch.float16,
