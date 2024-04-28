@@ -207,7 +207,7 @@ class hetero_speculative_decoding:
                                     temperature: float = 1,):
         """
         1. TODO: optimization, not creating server class every time call this function? 
-        will that save some space or time ?
+        will that save some space or time ? (maybe consider class method so no instance is created)
         """
         server_verifier = Server_side_verification(
             target_model = target_model)
