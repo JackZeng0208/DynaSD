@@ -140,7 +140,7 @@ class KVCacheModel(torch.nn.Module):
                 not_cached_q = torch.unsqueeze(not_cached_q, 0)
                 
             for i in range(not_cached_q.shape[-2]):   
-                not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p) 
+                not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
                 
             self._prob_history = torch.cat([self._prob_history, not_cached_q], dim=1)
             

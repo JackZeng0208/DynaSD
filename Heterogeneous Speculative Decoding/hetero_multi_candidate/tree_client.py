@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer
 # from hetero_speculative_decoding import hetero_speculative_decoding
 from speculative_decoding_with_tree import*
 from model.llama_tree_attn import LlamaForCausalLM
