@@ -1,6 +1,6 @@
 from datasets import load_dataset
 from transformers import AutoTokenizer
-
+from model.llama_tree_attn import LlamaForCausalLM
 from tqdm import tqdm
 from collections import Counter
 import re
@@ -63,7 +63,7 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
 
 def evaluate(dataset, model_name, server_ip, port, client_id):
     f1 = exact_match = total = 0
-    approx_model = AutoModelForCausalLM.from_pretrained(
+    approx_model = LlamaForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.float16, trust_remote_code=True)
     approx_tokenizer = AutoTokenizer.from_pretrained(
         model_name, trust_remote_code=True)
