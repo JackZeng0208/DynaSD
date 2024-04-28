@@ -100,7 +100,7 @@ class hetero_speculative_decoding:
         draft_model,
         server_ip,
         max_len,
-        tree_config = (2,2,2,1),
+        tree_config = (3,2,1),
         temperature = 1,
         client_id = ""):
         """
