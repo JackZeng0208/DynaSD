@@ -4,7 +4,6 @@ import zmq
 from utils import sample, norm_logits, max_fn, KVCacheModel
 from typing import Callable, List, Literal, Optional, Tuple, Union
 from dataclasses import dataclass
-import gc
 from torch.nn import functional as F
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
@@ -216,8 +215,7 @@ class HeteroSpeculativeDecoding:
         print(
             f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         print(f"Total verification time is {verification_time}")
-        del edge_draft_generator.draft_model_past_key_values
-        gc.collect()
+        torch.cuda.empty_cache()
         return input_ids, accepted_count / total_draft_generate_count
 
     def server_tree_attn_speculative_decoding(
@@ -849,7 +847,7 @@ class EdgeSideTreeStrategyGeneration:
             cand_probs.append(step_cand_probs)
             pruned_input_ids = cand_tokens
             input_ids = torch.cat((input_ids, pruned_input_ids), dim=1)
-
+        
         return DecoderOnlyDraftOutput(
             sequences=input_ids,
             past_key_values=past_key_values,
