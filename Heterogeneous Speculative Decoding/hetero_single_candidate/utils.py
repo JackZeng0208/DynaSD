@@ -149,19 +149,6 @@ class KVCacheModel(torch.nn.Module):
         
         return last_q
 
-        #     if not_cached_q.shape[1] > 0:
-        #         for i in range(not_cached_q.shape[-2]):   
-        #             not_cached_q[:, i, :] = norm_logits(not_cached_q[:, i, :], self._temperature, self._top_k, self._top_p)    
-                    
-        #         self._prob_history = torch.cat([self._prob_history, not_cached_q], dim=1)
-        #         last_q = not_cached_q[:, -1, :]
-        #     else:
-        #         last_q = self._prob_history[:, -1, :]
-            
-        #     self._past_key_values = outputs.past_key_values
-        
-        # return last_q
-
 
 
     def _generate_with_kvcache(self, prefix : torch.Tensor, 

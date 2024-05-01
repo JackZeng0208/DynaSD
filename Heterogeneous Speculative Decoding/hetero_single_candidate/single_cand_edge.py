@@ -3,7 +3,7 @@ from single_cand_speculative_decoding import hetero_speculative_decoding
 import os
 import torch
 import argparse
-
+import zmq
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         "Heterogeneous Speculative Decoding Client)")
@@ -27,11 +27,16 @@ if __name__ == '__main__':
     input_ids = draft_tokenizer.encode("Please write an introduction about UC Irvine: ", return_tensors='pt')
     top_k = 20
     top_p = 0.9
-    output = client.edge_single_cand_speculative_decoding(
+    context = zmq.Context()
+    socket = context.socket(zmq.REQ)
+    # Set send buffer size to 1 MB
+    socket.setsockopt(zmq.SNDBUF, 1024 * 1024)
+    socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
+    socket.connect(f"tcp://{args.server_ip}:{args.port}")
+    output = client.edge_speculative_decoding(
         input_ids=input_ids,
         draft_model=draft_model,
-        server_ip=args.server_ip,
-        port=args.port,
+        edge_socket=socket,
         max_len=128,
         gamma=4,
         client_id=args.client_id
