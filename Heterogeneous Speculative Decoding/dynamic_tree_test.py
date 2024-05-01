@@ -1,15 +1,17 @@
-import torch
+import csv
+import threading
 import time
-import zmq
-from utils import sample, norm_logits, max_fn, KVCacheModel
-from typing import Callable, List, Literal, Optional, Tuple, Union
 from dataclasses import dataclass
+from typing import Callable, List, Literal, Optional, Tuple, Union
+
+import pynvml
+import torch
+import zmq
 from torch.nn import functional as F
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
-import pynvml
-import threading
-import csv
+from utils import KVCacheModel, max_fn, norm_logits, sample
+
 pynvml.nvmlInit()
 
 
@@ -171,9 +173,9 @@ class HeteroSpeculativeDecoding:
             send_tensor_start_time = time.time()
             edge_socket.send_pyobj(
                 {'draft_tokens': draft_tokens,
-                'client_id': client_id,
-                'tree_config': draf_tree_config,
-                'cand_probs': cand_probs})  # cand probs needed for naive tree_attn
+                 'client_id': client_id,
+                 'tree_config': draf_tree_config,
+                 'cand_probs': cand_probs})  # cand probs needed for naive tree_attn
             target_model_mesg_dict = edge_socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
@@ -205,7 +207,8 @@ class HeteroSpeculativeDecoding:
             input_ids = new_tokens.to(edge_draft_generator.draft_model_device)
 
         if self.stats:
-            print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
+            print(
+                f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
         end_time = time.time()
 
         print(
@@ -219,23 +222,22 @@ class HeteroSpeculativeDecoding:
         return input_ids, accepted_count / total_draft_generate_count
 
     def server_tree_attn_speculative_decoding(
-            self,
-            server_socket,
-            target_model: torch.nn.Module,
-            temperature: float = 1,):
+        self,
+        server_socket,
+        target_model: torch.nn.Module,
+        temperature: float = 1,
+    ):
         """
         1. TODO: optimization, not creating server class every time call this function? 
         will that save some space or time ?
-        
+
         process:
             1. get token and cand_probs from edge
             2. forward get ground true probs for verify
             3. use reject sample (need cand_probs and ground truth) to verify
             4. return the new tokens and accepted index back to edge device, and some stats variable
         """
-        server_verifier = ServerSideVerification(
-            target_model=target_model)
-
+        server_verifier = ServerSideVerification(target_model=target_model)
         draft_tokens_dict = {}
         draft_tokens = None
         device = torch.device("cuda:0")
@@ -244,16 +246,19 @@ class HeteroSpeculativeDecoding:
             writer = csv.writer(file)
             while True:
                 gpu_utilization = []
+
                 def capture_gpu_utilization(stop_event):
                     # Adjust the sample interval as needed (in seconds) -> 1ms
                     sample_interval = 0.01
                     while not stop_event.is_set():
-                        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        utilization = pynvml.nvmlDeviceGetUtilizationRates(
+                            handle).gpu
                         gpu_utilization.append(utilization)
                         time.sleep(sample_interval)
                 # Start capturing GPU utilization in a separate thread
                 stop_event = threading.Event()
-                gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                gpu_thread = threading.Thread(
+                    target=capture_gpu_utilization, args=(stop_event,))
                 gpu_thread.start()
 
                 message = server_socket.recv_pyobj()
@@ -267,7 +272,8 @@ class HeteroSpeculativeDecoding:
                 draft_tokens = draft_tokens_dict[client_id]
                 # print(f"line 221: the type of draft_token after dict should be tensor {draft_tokens}")
 
-                draft_tokens = draft_tokens.to(server_verifier.target_model_device)
+                draft_tokens = draft_tokens.to(
+                    server_verifier.target_model_device)
                 target_forward_time = time.time()
                 target_logits = server_verifier.target_forward(
                     draft_tokens, tree_config=draft_tree_config)
@@ -298,16 +304,18 @@ class HeteroSpeculativeDecoding:
                 gpu_thread.join()
                 writer.writerow([gpu_utilization])
 
-    def edge_speculative_decoding(self,
-                                  input_ids: torch.Tensor,
-                                  draft_model: torch.nn.Module,
-                                  edge_socket: zmq.Socket,
-                                  max_len: int,
-                                  gamma: int = 4,
-                                  temperature: float = 1,
-                                  top_k: int = 0,
-                                  top_p: float = 0,
-                                  client_id: str = "") -> torch.Tensor:
+    def edge_speculative_decoding(
+        self,
+        input_ids: torch.Tensor,
+        draft_model: torch.nn.Module,
+        edge_socket: zmq.Socket,
+        max_len: int,
+        gamma: int = 4,
+        temperature: float = 1,
+        top_k: int = 0,
+        top_p: float = 0,
+        client_id: str = ""
+    ) -> torch.Tensor:
         """
         Args:
             input_ids (torch.Tensor): input tensor
@@ -333,7 +341,6 @@ class HeteroSpeculativeDecoding:
         input_ids = input_ids.to('cuda:0')
         start_time = time.time()
         draft_tokens = None
-        total_draft_generate_count = 0
 
         while input_ids.shape[1] < T:
             prefix_len = input_ids.shape[1]
@@ -341,7 +348,6 @@ class HeteroSpeculativeDecoding:
             draft_generate_start_time = time.time()
             draft_tokens = approx_model_cache.generate(
                 input_ids, gamma)
-            total_draft_generate_count += gamma
             draft_generate_end_time = time.time()
             self.time_spend_on_draft_model_generation += draft_generate_end_time - \
                 draft_generate_start_time
@@ -397,17 +403,19 @@ class HeteroSpeculativeDecoding:
             f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
         print(
             f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
-        print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
+        print(f"Acceptance Rate: {accepted_count / max_len}")
         approx_model_cache.clear_cache()
         return input_ids
 
     @torch.no_grad()
-    def sampling_without_kvcache(self,
-                                 draft_tokens: torch.Tensor,
-                                 target_model: torch.nn.Module,
-                                 temperature: float = 1,
-                                 top_k: int = 0,
-                                 top_p: float = 0) -> list:
+    def sampling_without_kvcache(
+        self,
+        draft_tokens: torch.Tensor,
+        target_model: torch.nn.Module,
+        temperature: float = 1,
+        top_k: int = 0,
+        top_p: float = 0
+    ) -> list:
         """
         Args:
             draft_tokens (torch.Tensor): tokens generated by draft model
@@ -423,14 +431,15 @@ class HeteroSpeculativeDecoding:
                 target_model_history[:, i, :], temperature, top_k, top_p)
         return target_model_history
 
-    def server_speculative_decoding(self,
-                                    server_socket,
-                                    target_model: torch.nn.Module,
-                                    temperature: float = 1,
-                                    top_k: int = 0,
-                                    top_p: float = 0,
-                                    random_seed: int = 1234
-                                    ):
+    def server_speculative_decoding(
+        self,
+        server_socket,
+        target_model: torch.nn.Module,
+        temperature: float = 1,
+        top_k: int = 0,
+        top_p: float = 0,
+        random_seed: int = 1234
+    ):
         """
         Args:
             socket (zmq.Socket): zmq socket object used for communication
@@ -476,11 +485,12 @@ class ServerSideVerification:
         self.target_model_temp = target_model_temp
         self.target_model_device = target_model.model.get_input_embeddings().weight.device
 
-    def new_verification(self,
-                         ground_probs: torch.FloatTensor,
-                         cand_probs: Tuple[torch.FloatTensor],
-                         cand_tokens: torch.LongTensor,
-                         ) -> Optional[int]:
+    def new_verification(
+        self,
+        ground_probs: torch.FloatTensor,
+        cand_probs: Tuple[torch.FloatTensor],
+        cand_tokens: torch.LongTensor,
+    ) -> Optional[int]:
         """
         previous verification may not return the longest sequence
         1. this version will return the longest sequence, but this is not typical acceptance 
@@ -495,12 +505,15 @@ class ServerSideVerification:
             else:
                 # FIXME: why does this do?
                 ground_probs -= cand_probs
-                ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
+                ground_probs = torch.nn.functional.relu(
+                    ground_probs, inplace=True)
                 ground_probs /= ground_probs.sum()
         return accepted_indices
 
-    def target_forward(self, input_ids,
-                       tree_config):
+    def target_forward(
+            self,
+            input_ids,
+            tree_config):
         """ 
         1. generate the tree_attn mask and forward to get ground truth logit
         2. TODO: not considering target model kv cache right may want to have it in the future
@@ -597,7 +610,7 @@ class ServerSideVerification:
         ground_probs = ground_probs[1:]
         idx_group_bias = [0]
         cand_probs_idx = [0]
-        
+
         """ 
         1. currently is using reject sampling to verify
         2. can add conditional statement here to switch to typical acceptance, to get accepted token's index
@@ -611,17 +624,14 @@ class ServerSideVerification:
                 current_layer_cand_prob_idx=cand_probs_idx
             )
             if len(current_ground_prob) == 0:
-
                 break
         # print(f"line 540: total path is {self.total_path}")
         # may want to consider a tie breaker for keep_indices
         if len(current_ground_prob) == 0:
-
             tail_ground_prob = init_ground_prob
             # print(f"***all rejected use initial probs {tail_ground_prob}\n")
             # means all candidate rejected
         else:
-
             longest_list_index = find_longest_list_index(self.total_path)
             if len(self.total_path[longest_list_index]) == self.max_draft_len:
                 to_drop_len = 1
@@ -729,6 +739,9 @@ class ServerSideVerification:
         for _ in range(repeat):
             self.total_path[offset].append(idx)
             offset += 1
+
+    def verify_dynamic_tree(self):
+        return
 
 
 class EdgeSideTreeStrategyGeneration:
@@ -849,7 +862,7 @@ class EdgeSideTreeStrategyGeneration:
             cand_probs.append(step_cand_probs)
             pruned_input_ids = cand_tokens
             input_ids = torch.cat((input_ids, pruned_input_ids), dim=1)
-        
+
         return DecoderOnlyDraftOutput(
             sequences=input_ids,
             past_key_values=past_key_values,
