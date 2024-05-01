@@ -1,6 +1,7 @@
 import torch
 from torch.nn import functional as F
 
+# Modified from: https://github.com/feifeibear/LLMSpeculativeSampling
 def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0):
     """
 
@@ -181,10 +182,6 @@ class KVCacheModel(torch.nn.Module):
         assert self._past_key_values
         for kv in self._past_key_values:
             k, v = kv
-            # NOTE() the indexing is specific for bloom. This won't work for other models
-            # For example llama k, v should be (batch, num_head, seq_len, hidden_dim)
-            
-            # k, v (batch, head, seq, hidden_dim)
             k = k[:, :, :end_pos, :]
             v = v[:, :, :end_pos, :]
             kv_trimmed = (k, v)
