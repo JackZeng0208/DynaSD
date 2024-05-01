@@ -55,7 +55,7 @@ def metric_max_over_ground_truths(metric_fn, prediction, ground_truths):
 def evaluate(dataset, model, tokenizer, socket: zmq.Socket):
     device = torch.device("cuda:0")
     handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-    with open(f"gpu_utilization.csv", mode='w', newline='') as file:
+    with open(f"gpu_utilization_vanilla_sd.csv", mode='w', newline='') as file:
         writer = csv.writer(file)
         while True:
             gpu_utilization = []

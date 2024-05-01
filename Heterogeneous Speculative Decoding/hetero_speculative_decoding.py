@@ -346,48 +346,25 @@ class HeteroSpeculativeDecoding:
             self.time_spend_on_draft_model_generation += draft_generate_end_time - \
                 draft_generate_start_time
 
-            # Send draft tokens to server
+            # Send draft tokens, prob_history, prefix_len, and gamma to server
             send_tensor_start_time = time.time()
             edge_socket.send_pyobj(
-                {'draft_tokens': draft_tokens, 'client_id': client_id})
+                {'draft_tokens': draft_tokens, 'prob_history': approx_model_cache._prob_history, 'prefix_len': prefix_len, 'gamma': gamma, 'client_id': client_id})
             target_model_mesg_dict = edge_socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
-            target_model_history = target_model_mesg_dict['target_prob_hist']
-            target_model_generation_time = target_model_mesg_dict['target_model_generation_time']
-            total_time_in_server = target_model_generation_time
+            input_ids = target_model_mesg_dict['input_ids']
+            accepted_count += target_model_mesg_dict['accepted_count']
+            resample_count += target_model_mesg_dict['resample_count']
+            target_sample_count += target_model_mesg_dict['target_sample_count']
+            total_time_in_server = target_model_mesg_dict['total_time_in_server']
+            rollback_num = target_model_mesg_dict['rollback']
+            
             self.time_spend_sending_message += send_tensor_end_time - \
                 send_tensor_start_time - total_time_in_server
-            self.time_spend_on_target_model_forward += target_model_generation_time
+            self.time_spend_on_target_model_forward += total_time_in_server
 
-            target_model_history = target_model_history.to('cuda:0')
-
-            n = prefix_len + gamma - 1
-            for i in range(gamma):
-                r = torch.rand(1, device='cuda:0')
-                j = draft_tokens[:, prefix_len + i]
-                if r > (target_model_history[:, prefix_len + i - 1, j]) / (approx_model_cache._prob_history[:, prefix_len + i - 1, j]):
-                    n = prefix_len + i - 1
-                    break
-                accepted_count += 1
-
-            assert n >= prefix_len - 1, f"n {n}, prefix_len {prefix_len}"
-            input_ids = draft_tokens[:, :n + 1]
-            approx_model_cache.rollback(n + 1)
-            assert approx_model_cache._prob_history.shape[-2] <= n + \
-                1, f"approx_model prob list shape {approx_model_cache._prob_history.shape}, n {n}"
-
-            if n < prefix_len + gamma - 1:
-                t = sample(max_fn(
-                    target_model_history[:, n, :] - approx_model_cache._prob_history[:, n, :]))
-                resample_count += 1
-            else:
-                assert n == target_model_history.shape[1] - 1
-                t = sample(target_model_history[:, -1, :])
-                target_sample_count += 1
-
-            input_ids = input_ids.to("cuda:0")
-            input_ids = torch.cat((input_ids, t), dim=1)
+            approx_model_cache.rollback(rollback_num)
 
         if self.stats:
             print(
@@ -424,25 +401,29 @@ class HeteroSpeculativeDecoding:
         return target_model_history
 
     def server_speculative_decoding(self,
-                                    server_socket,
-                                    target_model: torch.nn.Module,
-                                    temperature: float = 1,
-                                    top_k: int = 0,
-                                    top_p: float = 0,
-                                    random_seed: int = 1234
-                                    ):
+                                server_socket,
+                                target_model: torch.nn.Module,
+                                temperature: float = 1,
+                                top_k: int = 0,
+                                top_p: float = 0,
+                                random_seed: int = 1234
+                                ):
         """
         Args:
             socket (zmq.Socket): zmq socket object used for communication
             target_model (torch.nn.Module): target model for speculative decoding
         """
         draft_tokens_dict = {}
+        received_prob_history = {}
         draft_tokens = None
         target_model.to("cuda:0")
         while True:
             message = server_socket.recv_pyobj()
             client_id = message['client_id']
             received_draft_tokens = message['draft_tokens']
+            received_prob_history = message['prob_history']
+            prefix_len = message['prefix_len']
+            gamma = message['gamma']
             draft_tokens_dict[client_id] = received_draft_tokens
             draft_tokens = draft_tokens_dict[client_id]
             draft_tokens = draft_tokens.to("cuda:0")
@@ -455,11 +436,42 @@ class HeteroSpeculativeDecoding:
                 top_p=top_p,
             )
             finish_target_forward_time = time.time()
+
+            # Probability comparison (verification) on the server side
+            accepted_count = 0
+            resample_count = 0
+            target_sample_count = 0
+            n = prefix_len + gamma - 1
+            for i in range(gamma):
+                r = torch.rand(1, device='cuda:0')
+                j = draft_tokens[:, prefix_len + i]
+                if r > (target_model_history_tensor[:, prefix_len + i - 1, j]) / (received_prob_history[:, prefix_len + i - 1, j]):
+                    n = prefix_len + i - 1
+                    break
+                accepted_count += 1
+
+            input_ids = draft_tokens[:, :n + 1]
+
+            if n < prefix_len + gamma - 1:
+                t = sample(max_fn(
+                    target_model_history_tensor[:, n, :] - received_prob_history[:, n, :]))
+                resample_count += 1
+            else:
+                assert n == target_model_history_tensor.shape[1] - 1
+                t = sample(target_model_history_tensor[:, -1, :])
+                target_sample_count += 1
+
+            input_ids = torch.cat((input_ids, t), dim=1)
             draft_tokens_dict[client_id] = None
+
             response = {
-                'target_prob_hist': target_model_history_tensor,
-                'target_model_generation_time': finish_target_forward_time - target_forward_time,
-                'client_id': client_id
+                'input_ids': input_ids,
+                'accepted_count': accepted_count,
+                'resample_count': resample_count,
+                'target_sample_count': target_sample_count,
+                'total_time_in_server': finish_target_forward_time - target_forward_time,
+                'client_id': client_id,
+                'rollback': n+1
             }
             server_socket.send_pyobj(response)
 
