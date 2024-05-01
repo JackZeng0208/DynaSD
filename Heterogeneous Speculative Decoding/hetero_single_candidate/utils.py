@@ -41,7 +41,7 @@ def norm_logits(logits : torch.Tensor, temperature : float, top_k : float, top_p
     """
     assert logits.dim() == 2
     logits = logits / temperature
-    logits = top_k_top_p_filter(logits, top_k=top_k, top_p=top_p)
+    # logits = top_k_top_p_filter(logits, top_k=top_k, top_p=top_p)
     probs = F.softmax(logits, dim=1)
     return probs
 

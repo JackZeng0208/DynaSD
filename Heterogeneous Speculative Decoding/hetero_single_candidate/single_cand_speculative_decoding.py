@@ -80,6 +80,7 @@ class hetero_speculative_decoding:
 
             input_ids = target_model_mesg_dict['input_ids']
             accepted_count += target_model_mesg_dict['accepted_count']
+            print(f"this turn accepted rate {accepted_count/gamma}")
             resample_count += target_model_mesg_dict['resample_count']
             target_sample_count += target_model_mesg_dict['target_sample_count']
             total_time_in_server = target_model_mesg_dict['total_time_in_server']
