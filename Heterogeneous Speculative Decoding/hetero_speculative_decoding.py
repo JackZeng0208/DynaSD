@@ -293,6 +293,7 @@ class HeteroSpeculativeDecoding:
                     'verification_time': end_verification_time - verification_time
                 }
                 server_socket.send_pyobj(response)
+
                 # Stop capturing GPU utilization
                 stop_event.set()
                 gpu_thread.join()
@@ -417,64 +418,86 @@ class HeteroSpeculativeDecoding:
         received_prob_history = {}
         draft_tokens = None
         target_model.to("cuda:0")
-        while True:
-            message = server_socket.recv_pyobj()
-            client_id = message['client_id']
-            received_draft_tokens = message['draft_tokens']
-            received_prob_history = message['prob_history']
-            prefix_len = message['prefix_len']
-            gamma = message['gamma']
-            draft_tokens_dict[client_id] = received_draft_tokens
-            draft_tokens = draft_tokens_dict[client_id]
-            draft_tokens = draft_tokens.to("cuda:0")
-            target_forward_time = time.time()
-            target_model_history_tensor = self.sampling_without_kvcache(
-                draft_tokens=draft_tokens,
-                target_model=target_model,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-            )
-            finish_target_forward_time = time.time()
+        
+        device = torch.device("cuda:0")
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
+        with open(f"gpu_utilization_vanilla_sd.csv", mode='w', newline='') as file:
+            writer = csv.writer(file)
+            while True:
+                gpu_utilization = []
+                def capture_gpu_utilization(stop_event):
+                    # Adjust the sample interval as needed (in seconds) -> 1ms
+                    sample_interval = 0.1
+                    while not stop_event.is_set():
+                        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        gpu_utilization.append(utilization)
+                        time.sleep(sample_interval)
+                # Start capturing GPU utilization in a separate thread
+                stop_event = threading.Event()
+                gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                gpu_thread.start()
 
-            # Probability comparison (verification) on the server side
-            accepted_count = 0
-            resample_count = 0
-            target_sample_count = 0
-            n = prefix_len + gamma - 1
-            for i in range(gamma):
-                r = torch.rand(1, device='cuda:0')
-                j = draft_tokens[:, prefix_len + i]
-                if r > (target_model_history_tensor[:, prefix_len + i - 1, j]) / (received_prob_history[:, prefix_len + i - 1, j]):
-                    n = prefix_len + i - 1
-                    break
-                accepted_count += 1
+                message = server_socket.recv_pyobj()
+                client_id = message['client_id']
+                received_draft_tokens = message['draft_tokens']
+                received_prob_history = message['prob_history']
+                prefix_len = message['prefix_len']
+                gamma = message['gamma']
+                draft_tokens_dict[client_id] = received_draft_tokens
+                draft_tokens = draft_tokens_dict[client_id]
+                draft_tokens = draft_tokens.to("cuda:0")
+                target_forward_time = time.time()
+                target_model_history_tensor = self.sampling_without_kvcache(
+                    draft_tokens=draft_tokens,
+                    target_model=target_model,
+                    temperature=temperature,
+                    top_k=top_k,
+                    top_p=top_p,
+                )
+                finish_target_forward_time = time.time()
 
-            input_ids = draft_tokens[:, :n + 1]
+                # Probability comparison (verification) on the server side
+                accepted_count = 0
+                resample_count = 0
+                target_sample_count = 0
+                n = prefix_len + gamma - 1
+                for i in range(gamma):
+                    r = torch.rand(1, device='cuda:0')
+                    j = draft_tokens[:, prefix_len + i]
+                    if r > (target_model_history_tensor[:, prefix_len + i - 1, j]) / (received_prob_history[:, prefix_len + i - 1, j]):
+                        n = prefix_len + i - 1
+                        break
+                    accepted_count += 1
 
-            if n < prefix_len + gamma - 1:
-                t = sample(max_fn(
-                    target_model_history_tensor[:, n, :] - received_prob_history[:, n, :]))
-                resample_count += 1
-            else:
-                assert n == target_model_history_tensor.shape[1] - 1
-                t = sample(target_model_history_tensor[:, -1, :])
-                target_sample_count += 1
+                input_ids = draft_tokens[:, :n + 1]
 
-            input_ids = torch.cat((input_ids, t), dim=1)
-            draft_tokens_dict[client_id] = None
+                if n < prefix_len + gamma - 1:
+                    t = sample(max_fn(
+                        target_model_history_tensor[:, n, :] - received_prob_history[:, n, :]))
+                    resample_count += 1
+                else:
+                    assert n == target_model_history_tensor.shape[1] - 1
+                    t = sample(target_model_history_tensor[:, -1, :])
+                    target_sample_count += 1
 
-            response = {
-                'input_ids': input_ids,
-                'accepted_count': accepted_count,
-                'resample_count': resample_count,
-                'target_sample_count': target_sample_count,
-                'total_time_in_server': finish_target_forward_time - target_forward_time,
-                'client_id': client_id,
-                'rollback': n+1
-            }
-            server_socket.send_pyobj(response)
+                input_ids = torch.cat((input_ids, t), dim=1)
+                draft_tokens_dict[client_id] = None
 
+                response = {
+                    'input_ids': input_ids,
+                    'accepted_count': accepted_count,
+                    'resample_count': resample_count,
+                    'target_sample_count': target_sample_count,
+                    'total_time_in_server': finish_target_forward_time - target_forward_time,
+                    'client_id': client_id,
+                    'rollback': n+1
+                }
+                server_socket.send_pyobj(response)
+
+                # Stop capturing GPU utilization
+                stop_event.set()
+                gpu_thread.join()
+                writer.writerow([gpu_utilization])
 
 class ServerSideVerification:
     def __init__(
@@ -850,7 +873,6 @@ class EdgeSideTreeStrategyGeneration:
             logits = draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
 
             past_key_values = list(outputs.past_key_values)
-            # TODO: not sure if I can update kv like this
             self.draft_model_past_key_values = past_key_values
 
             step_cand_probs = torch.softmax(
@@ -868,11 +890,161 @@ class EdgeSideTreeStrategyGeneration:
             cand_probs=tuple(cand_probs),
             tree_config=self.tree_config)
 
+    def dynamic_k(self, logits: torch.Tensor, top_p: float, top_k: int, entropy_threshold: float) -> int:
+        """determine k config baesd on current output logits from the model
+
+        Args:
+            logits (torch.Tensor, shape: (batch_size, vocab_size)): 
+                generated probability distributino over all tokens based on context
+
+        Returns:
+            int: k config for next level
+        """
+        # perform entropy
+        log_tolerance = 1e-9
+        logits_prob = F.softmax(logits, dim=-1)
+        entropy = -(logits_prob * torch.log(logits_prob + log_tolerance)).sum(dim=-1)
+        if entropy.item() > entropy_threshold:
+            return 0
+
+        # perform top p 
+        sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+        sorted_indices_to_remove = cumulative_probs > top_p
+        print(f"sorted indices to remove {sorted_indices_to_remove}")
+
+        # shift indices to next position
+        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+        sorted_indices_to_remove[..., 0] = 0
+        print(f"sorted indices to remove after {sorted_indices_to_remove}")
+
+        sorted_logits[sorted_indices_to_remove] = -float('Inf')
+        #revert back the logit indeces
+        filtered_logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(-1))
+        print("before: ", filtered_logits)
+        
+        # perform top k
+        if top_k < filtered_logits.size(-1):
+            _, sorted_indices = torch.sort(filtered_logits, descending=True)
+            indices_to_remove = sorted_indices[-1, top_k:]
+            print(f"indices_to_remove: {indices_to_remove}")
+            filtered_logits[-1, indices_to_remove] = -float("Inf")
+        
+        print("after: ", filtered_logits)
+
+        indices = filtered_logits != -float('Inf')
+        return int(torch.sum(indices).item()), torch.where(filtered_logits != -float('Inf'))[1].tolist()
+    
     def generate_draft_dynamic_tree_attn(
-        self
+        self,
+        input_ids,
+        past_key_values,
+        draft_model,
+        top_p=0.9,
+        top_k=50,
+        entropy_threshold=2.5,
     ):
-        """
-        1. generate k during draft_generation 
-        2. return tokens and dynamic tree configuration 
-        """
-        pass
+        cand_probs = []
+        step_tree_attn_mask = None
+        position_ids = None
+        init_input_length = input_ids.size(1)
+        max_draft_len = 10  # Set a maximum depth for the dynamic tree
+        self.tree_config = []  # Initialize an empty list to store the dynamic tree configuration
+
+        if past_key_values is not None:
+            pruned_input_ids = input_ids[:, past_key_values[0][0].size(2):]
+        else:
+            pruned_input_ids = input_ids
+
+        for step in range(max_draft_len):
+            outputs: BaseModelOutputWithPast = draft_model.model(
+                input_ids=pruned_input_ids,
+                use_cache=True,
+                past_key_values=past_key_values,
+                return_dict=True,
+                output_attentions=False,
+                output_hidden_states=False,
+                tree_attn_mask=step_tree_attn_mask,
+                position_ids=position_ids,
+            )
+            hidden_states = outputs.last_hidden_state
+
+            if step == 0:
+                hidden_states = hidden_states[0, -1:]
+            else:
+                hidden_states = hidden_states[0]
+            logits = draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
+
+            past_key_values = list(outputs.past_key_values)
+            self.draft_model_past_key_values = past_key_values
+
+            step_k, cand_token_indices = self.dynamic_k(logits[0], top_p, top_k, entropy_threshold)
+
+            if step_k == 0:
+                break
+
+            self.tree_config.append(step_k)
+            cand_tokens = torch.tensor(cand_token_indices, device=self.draft_model_device).unsqueeze(0)
+
+            step_cand_probs = F.softmax(logits / self.draft_model_temp, dim=-1)
+            cand_probs.append(step_cand_probs)
+            pruned_input_ids = cand_tokens
+            input_ids = torch.cat((input_ids, pruned_input_ids), dim=1)
+
+            # Generate the tree attention mask for the current step
+            step_tree_attn_self_mask = self.get_tree_attn_from_dynamic_k(self.tree_config).to(
+                device=self.draft_model_device
+            )
+            context_attn_mask = torch.ones(
+                (step_tree_attn_self_mask.size(0), init_input_length), dtype=torch.bool
+            ).to(self.tree_attn_self_mask)
+            step_tree_attn_mask = torch.cat(
+                (context_attn_mask, step_tree_attn_self_mask), dim=1
+            )
+
+            position_ids = torch.arange(
+                init_input_length,
+                init_input_length + step_tree_attn_self_mask.size(0),
+                dtype=torch.long,
+                device=self.draft_model_device,
+            ).unsqueeze(0)
+
+        return DecoderOnlyDraftOutput(
+            sequences=input_ids,
+            past_key_values=past_key_values,
+            cand_probs=tuple(cand_probs),
+            tree_config=tuple(self.tree_config),
+        )
+    
+    def get_tree_attn_from_dynamic_k(self, k_config): # could be like ((2), (1,2), (3,0,1))
+        token_size = 0
+        level_threshold =[]
+        for level in k_config:
+            token_size += sum(level)
+            level_threshold.append(token_size)
+        attn_mask = torch.zeros((token_size, token_size), dtype=torch.bool)
+        attn_mask = attn_mask.diagonal_scatter(torch.ones(token_size))
+        idx_queue = [(0,None,idx) for idx in list(range(k_config[0][0]))]
+        while len(idx_queue) !=0:
+            depth, parent, idx = idx_queue.pop(0)
+            # print(f"{depth}, {parent}, {idx}")
+            if parent is not None:
+                # update the child
+                attn_mask[idx, : parent + 1] = attn_mask[parent, : parent + 1]
+            # deepest depth processed is len(k-config)-1
+            if depth < len(k_config)-1:
+                if depth ==0:
+                    idx_base = 0
+                else:
+                    idx_base = level_threshold[depth-1]
+                child_idx_base = level_threshold[depth]
+                child_config = k_config[depth+1]
+                distance_from_base = idx - idx_base
+                # if distance is zero, means the first k in child config
+                node_k = child_config[distance_from_base]
+                for child_idx_bais in range(node_k):
+                    
+                    level_child_location = sum(k_config[depth+1][:distance_from_base]) # no need for plus one here, because distance from base start from 1
+                    real_child_idx = level_child_location + child_idx_base + child_idx_bais
+                    idx_queue.append((depth+1,idx,real_child_idx))
+        return attn_mask
