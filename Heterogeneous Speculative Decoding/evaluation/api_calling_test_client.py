@@ -6,7 +6,7 @@ import csv
 import tqdm
 
 dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
-dataset = dataset['validation'].select(range(1000))
+dataset = dataset['validation'].select(range(5000))
 total_start_time = 0
 total_end_time = 0
 SERVER_IP = "192.168.0.132"
@@ -46,7 +46,7 @@ def send_request(user_id, start_index, end_index):
 
             time.sleep(1)
 
-num_users = 5
+num_users = 3
 examples_per_user = len(dataset) // num_users
 
 threads = []
