@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from torch.nn import functional as F
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
-import pynvml
-import threading
-import csv
-pynvml.nvmlInit()
+# import pynvml
+# import threading
+# import csv
+# pynvml.nvmlInit()
 
 
 def get_tree_attn_self_mask(k_config: Tuple[int]):
@@ -377,7 +377,7 @@ class HeteroSpeculativeDecoding:
             f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
         print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         approx_model_cache.clear_cache()
-        return input_ids
+        return input_ids, accepted_count / total_draft_generate_count, max_len / (end_time - start_time)
 
     @torch.no_grad()
     def sampling_without_kvcache(self,

@@ -76,30 +76,32 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
     socket.connect(f"tcp://{server_ip}:{port}")
     total_acceptace_rate = 0
+    total_token_speed = 0
     for example in tqdm(dataset):
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
         input_ids = approx_tokenizer.encode(input_str, return_tensors='pt')
 
-        output = client.edge_speculative_decoding(
+        output, acc_rate, token_speed = client.edge_speculative_decoding(
             input_ids=input_ids,
             draft_model=approx_model,
             edge_socket=socket,
             max_len=128,
             client_id=client_id
         )
-        pred_answer = approx_tokenizer.batch_decode(
-            output)[0].split("Answer:")[1].strip()
-        ground_truths = example["answer"]["aliases"]
+        # pred_answer = approx_tokenizer.batch_decode(
+        #     output)[0].split("Answer:")[1].strip()
+        # ground_truths = example["answer"]["aliases"]
         # exact_match += metric_max_over_ground_truths(
         #     exact_match_score, pred_answer, ground_truths)
         # f1 += metric_max_over_ground_truths(f1_score,
         #                                     pred_answer, ground_truths)
         total += 1
-
+        total_acceptace_rate += acc_rate
+        total_token_speed += token_speed
     # exact_match = 100.0 * exact_match / total
     # f1 = 100.0 * f1 / total
-    return(f"Total acceptance rate: {total_acceptace_rate / total}")
+    return total_acceptace_rate / total, total_token_speed / total
 
 
 if __name__ == "__main__":
@@ -110,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
     parser.add_argument("--range", nargs=2, type=int,
-                        default=[0, 2000], help="Range of dataset to evaluate")
+                        default=[666, 1332], help="Range of dataset to evaluate")
     parser.add_argument("--server_ip", type=str, default="192.168.0.132")
     parser.add_argument("--port", type=str, default="1919",
                         help="Server port number")
@@ -125,7 +127,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dataset = load_dataset(args.dataset, "rc.nocontext")
     dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
-    eval_result = evaluate(dataset, args.model_name,
+    acc_rate, speed = evaluate(dataset, args.model_name,
                            args.server_ip, args.port, args.client_id)
-    with open("vanilla_sd_acc_rate_triviaQA.txt", 'w') as f:
-        f.write(eval_result)
+    with open(f"vanilla_sd_benchmark_{os.getlogin()}_triviaQA.txt", 'w') as f:
+        f.write(f"Acceptance Rate: {acc_rate}, Token Generation Speed: {speed}")
