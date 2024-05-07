@@ -76,12 +76,13 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     socket.setsockopt(zmq.RCVBUF, 1024 * 1024)
     socket.connect(f"tcp://{server_ip}:{port}")
     total_acceptace_rate = 0
+    total_token_speed = 0
     for example in tqdm(dataset):
         question = example["question"]
         input_str = f"Question: {question}\nAnswer:"
         input_ids = approx_tokenizer.encode(input_str, return_tensors='pt')
 
-        output, acceptance_rate = client.edge_tree_attn_speculative_decoding(
+        output, acceptance_rate, token_speed  = client.edge_tree_attn_speculative_decoding(
             input_ids=input_ids,
             draft_model=approx_model,
             edge_socket=socket,
@@ -89,6 +90,7 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
             client_id=client_id
         )
         total_acceptace_rate += acceptance_rate
+        total_token_speed += token_speed
         # pred_answer = approx_tokenizer.batch_decode(
         #     output)[0].split("Answer:")[1].strip()
         # ground_truths = example["answer"]["aliases"]
@@ -100,7 +102,7 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
 
     # exact_match = 100.0 * exact_match / total
     # f1 = 100.0 * f1 / total
-    return total_acceptace_rate / total
+    return total_acceptace_rate / total, total_token_speed / total
 
 
 if __name__ == "__main__":
@@ -126,7 +128,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dataset = load_dataset(args.dataset, "rc.nocontext")
     dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
-    eval_result = evaluate(dataset, args.model_name,
+    acc_rate, speed = evaluate(dataset, args.model_name,
                            args.server_ip, args.port, args.client_id)
     with open(f"mcsd_benchmark_{os.getlogin()}_triviaQA.txt", 'w') as f:
-        f.write(f"Acceptance Rate: {eval_result}")
+        f.write(f"Acceptance Rate: {acc_rate}, Token Generation Speed: {speed}")
