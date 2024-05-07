@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from torch.nn import functional as F
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
-# import pynvml
-# import threading
-# import csv
-# pynvml.nvmlInit()
+import pynvml
+import threading
+import csv
+
 
 
 def get_tree_attn_self_mask(k_config: Tuple[int]):
@@ -112,7 +112,7 @@ class HeteroSpeculativeDecoding:
             input_ids,
             draft_model,
             edge_socket,
-            max_len,
+            max_len = 128,
             tree_config=(3, 2, 1),
             temperature=1,
             client_id=""):
@@ -216,7 +216,7 @@ class HeteroSpeculativeDecoding:
             f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         print(f"Total verification time is {verification_time}")
         torch.cuda.empty_cache()
-        return input_ids, accepted_count / total_draft_generate_count
+        return input_ids, accepted_count / total_draft_generate_count, max_len / (end_time - start_time)
 
     def server_tree_attn_speculative_decoding(
             self,
@@ -236,6 +236,7 @@ class HeteroSpeculativeDecoding:
         server_verifier = ServerSideVerification(
             target_model=target_model)
 
+        pynvml.nvmlInit()
         draft_tokens_dict = {}
         draft_tokens = None
         device = torch.device("cuda:0")
@@ -419,6 +420,7 @@ class HeteroSpeculativeDecoding:
         draft_tokens = None
         target_model.to("cuda:0")
         
+        pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
         with open(f"gpu_utilization_vanilla_sd.csv", mode='w', newline='') as file:
