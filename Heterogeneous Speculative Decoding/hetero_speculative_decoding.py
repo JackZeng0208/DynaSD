@@ -247,7 +247,7 @@ class HeteroSpeculativeDecoding:
                 gpu_utilization = []
                 def capture_gpu_utilization(stop_event):
                     # Adjust the sample interval as needed (in seconds) -> 1ms
-                    sample_interval = 0.1
+                    sample_interval = 1
                     while not stop_event.is_set():
                         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
                         gpu_utilization.append(utilization)
@@ -429,7 +429,7 @@ class HeteroSpeculativeDecoding:
                 gpu_utilization = []
                 def capture_gpu_utilization(stop_event):
                     # Adjust the sample interval as needed (in seconds) -> 1ms
-                    sample_interval = 0.1
+                    sample_interval = 1
                     while not stop_event.is_set():
                         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
                         gpu_utilization.append(utilization)
