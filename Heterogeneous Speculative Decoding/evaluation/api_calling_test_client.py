@@ -44,8 +44,6 @@ def send_request(user_id, start_index, end_index):
             # print(f"F1 Score: {f1}")
             # print()
 
-            time.sleep(1)
-
 num_users = 3
 examples_per_user = len(dataset) // num_users
 
