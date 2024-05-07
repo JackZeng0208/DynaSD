@@ -112,7 +112,7 @@ model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", to
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 
 dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
-dataset = dataset['validation'].select(range(5000))
+dataset = dataset['validation'].select(range(2000))
 
 context = zmq.Context()
 socket = context.socket(zmq.REP)
