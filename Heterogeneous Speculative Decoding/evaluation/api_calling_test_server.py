@@ -52,7 +52,7 @@ pynvml.nvmlInit()
 #         scores_for_ground_truths.append(score)
 #     return max(scores_for_ground_truths)
 
-def evaluate(dataset, model, tokenizer, socket: zmq.Socket):
+def evaluate(model, tokenizer, socket: zmq.Socket):
     device = torch.device("cuda:0")
     handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
     with open(f"gpu_utilization_api_calling.csv", mode='w', newline='') as file:
@@ -61,7 +61,7 @@ def evaluate(dataset, model, tokenizer, socket: zmq.Socket):
             gpu_utilization = []
             def capture_gpu_utilization(stop_event):
                 # Adjust the sample interval as needed (in seconds) -> 1ms
-                sample_interval = 0.1
+                sample_interval = 1
                 while not stop_event.is_set():
                     utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
                     gpu_utilization.append(utilization)
@@ -75,16 +75,16 @@ def evaluate(dataset, model, tokenizer, socket: zmq.Socket):
             start_time = time.time()
             # print(f"Received question: {question}")
             # Find the corresponding example in the dataset
-            example = next((ex for ex in dataset if ex["question"] == question), None)
-            if example is None:
-                print(f"Question not found in the dataset: {question}")
-                result = {
-                    "output": "None",
-                    "inference_time": 0,
-                    "gpu_utilization": []
-                }
-                socket.send_json(result)
-                continue
+            # example = next((ex for ex in dataset if ex["question"] == question), None)
+            # if example is None:
+            #     print(f"Question not found in the dataset: {question}")
+            #     result = {
+            #         "output": "None",
+            #         "inference_time": 0,
+            #         "gpu_utilization": []
+            #     }
+            #     socket.send_json(result)
+            #     continue
             # ground_truths = example["answer"]["aliases"]
             input_str = f"Question: {question}\nAnswer:"
             input_ids = tokenizer.encode(input_str, return_tensors="pt").to("cuda:0")
@@ -111,12 +111,10 @@ def evaluate(dataset, model, tokenizer, socket: zmq.Socket):
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-chat-hf", torch_dtype=torch.float16).to("cuda:0")
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf")
 
-dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
-dataset = dataset['validation'].select(range(2000))
 
 context = zmq.Context()
 socket = context.socket(zmq.REP)
 socket.bind("tcp://*:1919")
 print("Server is running...")
 
-evaluate(dataset, model, tokenizer, socket)
+evaluate(model, tokenizer, socket)
