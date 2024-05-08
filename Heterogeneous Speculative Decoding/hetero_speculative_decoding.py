@@ -247,7 +247,7 @@ class HeteroSpeculativeDecoding:
                 gpu_utilization = []
                 def capture_gpu_utilization(stop_event):
                     # Adjust the sample interval as needed (in seconds) -> 1ms
-                    sample_interval = 0.001
+                    sample_interval = 1
                     while not stop_event.is_set():
                         utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
                         gpu_utilization.append(utilization)
@@ -351,7 +351,11 @@ class HeteroSpeculativeDecoding:
             # Send draft tokens, prob_history, prefix_len, and gamma to server
             send_tensor_start_time = time.time()
             edge_socket.send_pyobj(
-                {'draft_tokens': draft_tokens, 'prob_history': approx_model_cache._prob_history, 'prefix_len': prefix_len, 'gamma': gamma, 'client_id': client_id})
+                {'draft_tokens': draft_tokens, 
+                 'prob_history': approx_model_cache._prob_history, 
+                 'prefix_len': prefix_len, 'gamma': gamma, 
+                 'client_id': client_id,
+                 'end': False})
             target_model_mesg_dict = edge_socket.recv_pyobj()
             send_tensor_end_time = time.time()
 
@@ -423,23 +427,32 @@ class HeteroSpeculativeDecoding:
         pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-        with open(f"gpu_utilization_vanilla_sd.csv", mode='w', newline='') as file:
-            writer = csv.writer(file)
-            while True:
-                gpu_utilization = []
-                def capture_gpu_utilization(stop_event):
-                    # Adjust the sample interval as needed (in seconds) -> 1ms
-                    sample_interval = 0.001
-                    while not stop_event.is_set():
-                        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-                        gpu_utilization.append(utilization)
-                        time.sleep(sample_interval)
-                # Start capturing GPU utilization in a separate thread
-                stop_event = threading.Event()
-                gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
-                gpu_thread.start()
+        with open(f"gpu_utilization_vanilla_sd.txt", mode='w', newline='') as file:
+            gpu_utilization = []
+            def capture_gpu_utilization(stop_event):
+                # Adjust the sample interval as needed (in seconds) -> 1ms
+                sample_interval = 1
+                while not stop_event.is_set():
+                    utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                    gpu_utilization.append(utilization)
+                    time.sleep(sample_interval)
+            # Start capturing GPU utilization in a separate thread
+            stop_event = threading.Event()
+            gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+            gpu_thread.start()
 
+            while True:
                 message = server_socket.recv_pyobj()
+                end_flag = message['end']
+                if end_flag:
+                    # Stop capturing GPU utilization
+                    stop_event.set()
+                    gpu_thread.join()
+                    file.write(str(gpu_utilization))
+                    server_socket.send_pyobj('End')
+                    server_socket.close()
+                    exit()
+
                 client_id = message['client_id']
                 received_draft_tokens = message['draft_tokens']
                 received_prob_history = message['prob_history']
@@ -495,11 +508,6 @@ class HeteroSpeculativeDecoding:
                     'rollback': n+1
                 }
                 server_socket.send_pyobj(response)
-
-                # Stop capturing GPU utilization
-                stop_event.set()
-                gpu_thread.join()
-                writer.writerow([gpu_utilization])
 
 class ServerSideVerification:
     def __init__(
