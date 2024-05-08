@@ -26,7 +26,7 @@ def send_request(user_id, start_index, end_index):
             question = example["question"]
 
             start_time = time.time()
-            socket.send_pyobj(question)
+            socket.send_pyobj({"question": question, "user_id": user_id, "end": False})
             response = socket.recv_pyobj()
             end_time = time.time()
             total_time = end_time - start_time
@@ -36,7 +36,10 @@ def send_request(user_id, start_index, end_index):
             output = response["output"]
             inference_speed = len(output)/total_time
             writer.writerow([inference_time, transmission_time, total_time, inference_speed])
-
+        socket.send_pyobj({"user_id": user_id, "end": True})
+        socket.close()
+        exit()
+        
 num_users = 3
 examples_per_user = len(dataset) // num_users
 
