@@ -423,6 +423,7 @@ class HeteroSpeculativeDecoding:
         received_prob_history = {}
         draft_tokens = None
         target_model.to("cuda:0")
+        device_list = set()
         
         pynvml.nvmlInit()
         device = torch.device("cuda:0")
@@ -440,14 +441,21 @@ class HeteroSpeculativeDecoding:
             init_flag = True
             while True:
                 message = server_socket.recv_pyobj()
+                client_id = message['client_id']
+                end_flag = message['end']
+
                 if init_flag:
                     # Start capturing GPU utilization in a separate thread
                     stop_event = threading.Event()
                     gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
                     gpu_thread.start()
                     init_flag = False
-                end_flag = message['end']
+
                 if end_flag:
+                    device_list.remove(client_id)
+                    continue
+                    
+                if len(device_list) == 0:
                     # Stop capturing GPU utilization
                     stop_event.set()
                     gpu_thread.join()
@@ -455,7 +463,8 @@ class HeteroSpeculativeDecoding:
                     server_socket.close()
                     exit()
 
-                client_id = message['client_id']
+                device_list.add(client_id)
+                
                 received_draft_tokens = message['draft_tokens']
                 received_prob_history = message['prob_history']
                 prefix_len = message['prefix_len']

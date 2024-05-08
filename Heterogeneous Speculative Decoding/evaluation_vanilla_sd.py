@@ -51,7 +51,7 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
         total_token_speed += token_speed
     # exact_match = 100.0 * exact_match / total
     # f1 = 100.0 * f1 / total
-    socket.send_pyobj({"end": True})
+    socket.send_pyobj({"client_id": client_id, "end": True})
     socket.close()
     return total_acceptace_rate / total, total_token_speed / total
 
