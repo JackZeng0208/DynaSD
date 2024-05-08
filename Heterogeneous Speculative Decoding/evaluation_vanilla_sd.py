@@ -52,7 +52,6 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     # exact_match = 100.0 * exact_match / total
     # f1 = 100.0 * f1 / total
     socket.send_pyobj({"end": True})
-    socket.recv_pyobj()
     socket.close()
     return total_acceptace_rate / total, total_token_speed / total
 
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
     parser.add_argument("--range", nargs=2, type=int,
-                        default=[666, 1332], help="Range of dataset to evaluate")
+                        default=[0, 20], help="Range of dataset to evaluate")
     parser.add_argument("--server_ip", type=str, default="192.168.0.132")
     parser.add_argument("--port", type=str, default="1919",
                         help="Server port number")
@@ -84,7 +83,7 @@ if __name__ == "__main__":
     dataset = dataset['validation']
     dataset = dataset.filter(lambda example: len(example["question"]) <= 128)
     
-    dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
+    dataset = dataset.select([i for i in range(args.range[0], args.range[1])])
     acc_rate, speed = evaluate(dataset, args.model_name,
                            args.server_ip, args.port, args.client_id)
     with open(f"vanilla_sd_benchmark_{os.getlogin()}_triviaQA.txt", 'w') as f:
