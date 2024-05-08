@@ -437,10 +437,6 @@ class HeteroSpeculativeDecoding:
                     # print(f"GPU utilization: {utilization}")
                     gpu_utilization.append(utilization)
                     time.sleep(sample_interval)
-            # Start capturing GPU utilization in a separate thread
-            stop_event = threading.Event()
-            gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
-            gpu_thread.start()
             init_flag = True
             while True:
                 message = server_socket.recv_pyobj()
