@@ -33,3 +33,8 @@ if __name__ == "__main__":
         server_socket= socket,
         target_model=target_model
     )
+    
+    # server.server_tree_attn_speculative_decoding(
+    #     server_socket= socket,
+    #     target_model=target_model
+    # )

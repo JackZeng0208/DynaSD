@@ -52,6 +52,8 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
     # exact_match = 100.0 * exact_match / total
     # f1 = 100.0 * f1 / total
     socket.send_pyobj({"client_id": client_id, "end": True})
+    message = socket.recv_pyobj()
+    print(message)
     socket.close()
     return total_acceptace_rate / total, total_token_speed / total
 
@@ -64,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
     parser.add_argument("--range", nargs=2, type=int,
-                        default=[0, 20], help="Range of dataset to evaluate")
+                        default=[0, 10], help="Range of dataset to evaluate")
     parser.add_argument("--server_ip", type=str, default="192.168.0.132")
     parser.add_argument("--port", type=str, default="1919",
                         help="Server port number")

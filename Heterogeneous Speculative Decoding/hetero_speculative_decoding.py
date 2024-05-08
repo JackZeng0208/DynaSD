@@ -441,8 +441,21 @@ class HeteroSpeculativeDecoding:
             init_flag = True
             while True:
                 message = server_socket.recv_pyobj()
+                # print(f"message received {message}")
                 client_id = message['client_id']
                 end_flag = message['end']
+
+                if end_flag:
+                    device_list.remove(client_id)
+                    if len(device_list) == 0:
+                        # Stop capturing GPU utilization
+                        stop_event.set()
+                        gpu_thread.join()
+                        file.write(str(gpu_utilization))
+                        server_socket.send_pyobj("End of communication")
+                        server_socket.close()
+                        exit()
+                    continue
 
                 if init_flag:
                     # Start capturing GPU utilization in a separate thread
@@ -450,18 +463,6 @@ class HeteroSpeculativeDecoding:
                     gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
                     gpu_thread.start()
                     init_flag = False
-
-                if end_flag:
-                    device_list.remove(client_id)
-                    continue
-                    
-                if len(device_list) == 0:
-                    # Stop capturing GPU utilization
-                    stop_event.set()
-                    gpu_thread.join()
-                    file.write(str(gpu_utilization))
-                    server_socket.close()
-                    exit()
 
                 device_list.add(client_id)
                 
