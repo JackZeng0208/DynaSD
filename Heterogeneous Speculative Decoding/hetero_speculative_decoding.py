@@ -434,22 +434,28 @@ class HeteroSpeculativeDecoding:
                 sample_interval = 1
                 while not stop_event.is_set():
                     utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                    # print(f"GPU utilization: {utilization}")
                     gpu_utilization.append(utilization)
                     time.sleep(sample_interval)
             # Start capturing GPU utilization in a separate thread
             stop_event = threading.Event()
             gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
             gpu_thread.start()
-
+            init_flag = True
             while True:
                 message = server_socket.recv_pyobj()
+                if init_flag:
+                    # Start capturing GPU utilization in a separate thread
+                    stop_event = threading.Event()
+                    gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                    gpu_thread.start()
+                    init_flag = False
                 end_flag = message['end']
                 if end_flag:
                     # Stop capturing GPU utilization
                     stop_event.set()
                     gpu_thread.join()
                     file.write(str(gpu_utilization))
-                    server_socket.send_pyobj('End')
                     server_socket.close()
                     exit()
 
