@@ -4,3 +4,4 @@ bitsandbytes
 accelerate
 pyzmq
 torch
+pynvml
