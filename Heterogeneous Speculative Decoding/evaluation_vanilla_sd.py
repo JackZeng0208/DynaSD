@@ -12,7 +12,7 @@ import torch
 import zmq
 
 def evaluate(dataset, model_name, server_ip, port, client_id):
-    f1 = exact_match = total = 0
+    total = 0
     approx_model = LlamaForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.float16)
     approx_tokenizer = AutoTokenizer.from_pretrained(
@@ -39,18 +39,9 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
             max_len=128,
             client_id=client_id
         )
-        # pred_answer = approx_tokenizer.batch_decode(
-        #     output)[0].split("Answer:")[1].strip()
-        # ground_truths = example["answer"]["aliases"]
-        # exact_match += metric_max_over_ground_truths(
-        #     exact_match_score, pred_answer, ground_truths)
-        # f1 += metric_max_over_ground_truths(f1_score,
-        #                                     pred_answer, ground_truths)
         total += 1
         total_acceptace_rate += acc_rate
         total_token_speed += token_speed
-    # exact_match = 100.0 * exact_match / total
-    # f1 = 100.0 * f1 / total
     socket.send_pyobj({"client_id": client_id, "end": True})
     message = socket.recv_pyobj()
     print(message)
@@ -80,12 +71,10 @@ if __name__ == "__main__":
                         default="Please write an introduction about UC Irvine:")
     args = parser.parse_args()
     dataset = load_dataset(args.dataset, "rc.nocontext")
-
-    dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
     dataset = dataset['validation']
     dataset = dataset.filter(lambda example: len(example["question"]) <= 128)
-    
     dataset = dataset.select([i for i in range(args.range[0], args.range[1])])
+    
     acc_rate, speed = evaluate(dataset, args.model_name,
                            args.server_ip, args.port, args.client_id)
     with open(f"vanilla_sd_benchmark_{os.getlogin()}_triviaQA.txt", 'w') as f:
