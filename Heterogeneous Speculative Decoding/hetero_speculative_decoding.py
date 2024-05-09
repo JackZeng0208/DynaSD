@@ -113,7 +113,7 @@ class HeteroSpeculativeDecoding:
             draft_model,
             edge_socket,
             max_len = 128,
-            tree_config=(3, 2, 1),
+            tree_config=(1, 3, 1),
             temperature=1,
             client_id=""):
         """
@@ -209,15 +209,21 @@ class HeteroSpeculativeDecoding:
             print(f"generated tokens numbers {input_ids.shape[-1] - seq_len}, accepted_count {accepted_count}, target_sample_count {target_sample_count}, resample_count {resample_count}")
         end_time = time.time()
 
-        print(
-            f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
-        print(
-            f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
-        print(
-            f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
+        print(f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
+
+        token_generate_speed = 0
+        if (input_ids.shape[-1] - seq_len) >= max_len:
+            token_generate_speed = max_len / (end_time - start_time)
+            print(f"Token Generation Speed (with speculative decoding): {token_generate_speed} tokens/s")
+        else:
+            token_generate_speed = (input_ids.shape[-1] - seq_len) / (end_time - start_time)
+            print(f"Token Generation Speed (with speculative decoding): {token_generate_speed} tokens/s")
+        
+        print(f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
+        print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         print(f"Total verification time is {verification_time}")
         torch.cuda.empty_cache()
-        return input_ids, accepted_count / total_draft_generate_count, max_len / (end_time - start_time)
+        return input_ids, accepted_count / total_draft_generate_count, token_generate_speed
 
     def server_tree_attn_speculative_decoding(
             self,
@@ -244,7 +250,7 @@ class HeteroSpeculativeDecoding:
         pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-        with open(f"gpu_utilization_MCSD.txt", mode='w', newline='') as file:
+        with open(f"gpu_utilization_mcsd_131.txt", mode='w', newline='') as file:
             gpu_utilization = []
             def capture_gpu_utilization(stop_event):
                 # Adjust the sample interval as needed (in seconds) -> 1ms
@@ -318,11 +324,6 @@ class HeteroSpeculativeDecoding:
                     'verification_time': end_verification_time - verification_time
                 }
                 server_socket.send_pyobj(response)
-
-                # Stop capturing GPU utilization
-                stop_event.set()
-                gpu_thread.join()
-                writer.writerow([gpu_utilization])
 
     def edge_speculative_decoding(self,
                                   input_ids: torch.Tensor,
@@ -402,11 +403,18 @@ class HeteroSpeculativeDecoding:
         end_time = time.time()
         print(
             f'total time spend on heterogeneous speculative decoding: {end_time - start_time}')
-        print(
-            f"Token Generation Speed (with speculative decoding): {max_len / (end_time - start_time)} tokens/s")
+        
+        token_generate_speed = 0
+        if (input_ids.shape[-1] - seq_len) >= max_len:
+            token_generate_speed = max_len / (end_time - start_time)
+            print(f"Token Generation Speed (with speculative decoding): {token_generate_speed} tokens/s")
+        else:
+            token_generate_speed = (input_ids.shape[-1] - seq_len) / (end_time - start_time)
+            print(f"Token Generation Speed (with speculative decoding): {token_generate_speed} tokens/s")
+
         print(f"Acceptance Rate: {accepted_count / total_draft_generate_count}")
         approx_model_cache.clear_cache()
-        return input_ids, accepted_count / total_draft_generate_count, max_len / (end_time - start_time)
+        return input_ids, accepted_count / total_draft_generate_count, token_generate_speed
 
     @torch.no_grad()
     def sampling_without_kvcache(self,
