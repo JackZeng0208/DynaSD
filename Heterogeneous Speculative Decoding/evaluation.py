@@ -37,7 +37,8 @@ def evaluate(dataset, model_name, server_ip, port, client_id):
             draft_model=approx_model,
             edge_socket=socket,
             max_len=128,
-            client_id=client_id
+            client_id=client_id,
+            tree_config=(1,3,1)
         )
         total += 1
         total_acceptace_rate += acceptance_rate
