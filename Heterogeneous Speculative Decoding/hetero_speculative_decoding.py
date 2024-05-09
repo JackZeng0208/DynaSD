@@ -172,6 +172,7 @@ class HeteroSpeculativeDecoding:
             edge_socket.send_pyobj(
                 {'draft_tokens': draft_tokens,
                 'client_id': client_id,
+                'end': False,
                 'tree_config': draf_tree_config,
                 'cand_probs': cand_probs})  # cand probs needed for naive tree_attn
             target_model_mesg_dict = edge_socket.recv_pyobj()
@@ -236,29 +237,52 @@ class HeteroSpeculativeDecoding:
         server_verifier = ServerSideVerification(
             target_model=target_model)
 
-        pynvml.nvmlInit()
         draft_tokens_dict = {}
         draft_tokens = None
+        device_list = set()
+
+        pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-        with open(f"gpu_utilization_MCSD.csv", mode='w', newline='') as file:
-            writer = csv.writer(file)
+        with open(f"gpu_utilization_MCSD.txt", mode='w', newline='') as file:
+            gpu_utilization = []
+            def capture_gpu_utilization(stop_event):
+                # Adjust the sample interval as needed (in seconds) -> 1ms
+                sample_interval = 1
+                while not stop_event.is_set():
+                    utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                    # print(f"GPU utilization: {utilization}")
+                    gpu_utilization.append(utilization)
+                    time.sleep(sample_interval)
+            init_flag = True
+            
             while True:
-                gpu_utilization = []
-                def capture_gpu_utilization(stop_event):
-                    # Adjust the sample interval as needed (in seconds) -> 1ms
-                    sample_interval = 1
-                    while not stop_event.is_set():
-                        utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-                        gpu_utilization.append(utilization)
-                        time.sleep(sample_interval)
-                # Start capturing GPU utilization in a separate thread
-                stop_event = threading.Event()
-                gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
-                gpu_thread.start()
-
                 message = server_socket.recv_pyobj()
                 client_id = message['client_id']
+                end_flag = message['end']
+                if end_flag:
+                    device_list.remove(client_id)
+                    print(f"Current device list: {device_list}")
+                    if len(device_list) == 0:
+                        # Stop capturing GPU utilization
+                        stop_event.set()
+                        gpu_thread.join()
+                        file.write(str(gpu_utilization))
+                        server_socket.send_pyobj("Close server")
+                        server_socket.close()
+                        exit()
+                    server_socket.send_pyobj(f"End of running for {client_id}")
+                    continue
+
+                if init_flag:
+                    # Start capturing GPU utilization in a separate thread
+                    stop_event = threading.Event()
+                    gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                    gpu_thread.start()
+                    init_flag = False
+
+                device_list.add(client_id)
+
                 received_draft_tokens = message['draft_tokens']
                 # print(f"line 215: the type of draft_token just received from edge should be tensor {draft_tokens}")
 
