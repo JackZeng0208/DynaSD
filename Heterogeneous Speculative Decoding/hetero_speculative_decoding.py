@@ -444,17 +444,19 @@ class HeteroSpeculativeDecoding:
                 # print(f"message received {message}")
                 client_id = message['client_id']
                 end_flag = message['end']
-
+                # print(end_flag)
                 if end_flag:
                     device_list.remove(client_id)
+                    print(f"Current device list: {device_list}")
                     if len(device_list) == 0:
                         # Stop capturing GPU utilization
                         stop_event.set()
                         gpu_thread.join()
                         file.write(str(gpu_utilization))
-                        server_socket.send_pyobj("End of communication")
+                        server_socket.send_pyobj("Close server")
                         server_socket.close()
                         exit()
+                    server_socket.send_pyobj(f"End of running for {client_id}")
                     continue
 
                 if init_flag:
