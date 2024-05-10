@@ -10,7 +10,7 @@ pynvml.nvmlInit()
 def evaluate(model, tokenizer, socket: zmq.Socket):
     device = torch.device("cuda:0")
     handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-    with open(f"gpu_utilization_api_calling.txt", mode='w', newline='') as file:
+    with open(f"gpu_utilization_api_calling_short_test.txt", mode='w', newline='') as file:
         gpu_utilization = []
         def capture_gpu_utilization(stop_event):
             # Adjust the sample interval as needed (in seconds) -> 1ms
