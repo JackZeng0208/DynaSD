@@ -299,17 +299,18 @@ class HeteroSpeculativeDecoding:
                 # print(f"line 221: the type of draft_token after dict should be tensor {draft_tokens}")
 
                 draft_tokens = draft_tokens.to(server_verifier.target_model_device)
-                target_forward_time = time.time()
-                target_logits = server_verifier.target_forward(
-                    draft_tokens, tree_config=draft_tree_config)
-                finish_target_forward_time = time.time()
+                with torch.no_grad():
+                    target_forward_time = time.time()
+                    target_logits = server_verifier.target_forward(
+                        draft_tokens, tree_config=draft_tree_config)
+                    finish_target_forward_time = time.time()
 
-                verification_time = time.time()
-                output = server_verifier.verify_longest_candidate_hetero(
-                    input_ids=draft_tokens,
-                    cand_probs=cand_probs,
-                    logits=target_logits,)
-                end_verification_time = time.time()
+                    verification_time = time.time()
+                    output = server_verifier.verify_longest_candidate_hetero(
+                        input_ids=draft_tokens,
+                        cand_probs=cand_probs,
+                        logits=target_logits,)
+                    end_verification_time = time.time()
 
                 new_tokens = output.sequences
                 accepted_indices = output.draft_model_accept_indices
@@ -590,8 +591,7 @@ class ServerSideVerification:
                 ground_probs /= ground_probs.sum()
         return accepted_indices
 
-    def target_forward(self, input_ids,
-                       tree_config):
+    def target_forward(self, input_ids,tree_config):
         """ 
         1. generate the tree_attn mask and forward to get ground truth logit
         2. TODO: not considering target model kv cache right may want to have it in the future
@@ -605,29 +605,21 @@ class ServerSideVerification:
         init_input_length = input_ids.size(1) - tree_attn_len
         pruned_input_ids = input_ids
 
-        tree_attn_mask = torch.zeros(
-            (input_ids.size(1), input_ids.size(1)),
-            dtype=torch.bool,
-            device=self.target_model_device,
-        )
-        mask_cond = torch.arange(
-            tree_attn_mask.size(-1), device=self.target_model_device
-        )
-        tree_attn_mask.masked_fill_(
-            mask_cond < (mask_cond + 1).view(tree_attn_mask.size(-1), 1), 1
-        )
-        tree_attn_mask[-tree_attn_len:, -
-                       tree_attn_len:] = self.tree_attn_self_mask
+        tree_attn_mask = torch.zeros((input_ids.size(1), input_ids.size(1)),dtype=torch.bool,device=self.target_model_device)
+        mask_cond = torch.arange(tree_attn_mask.size(-1), device=self.target_model_device)
+        tree_attn_mask.masked_fill_(mask_cond < (mask_cond + 1).view(tree_attn_mask.size(-1), 1), 1)
+        tree_attn_mask[-tree_attn_len:, -tree_attn_len:] = self.tree_attn_self_mask
         position_ids = tree_attn_mask.sum(dim=1) - 1
 
-        outputs: BaseModelOutputWithPast = self.target_model.model(
-            input_ids=pruned_input_ids,
-            return_dict=True,
-            output_attentions=False,
-            output_hidden_states=False,
-            tree_attn_mask=tree_attn_mask,
-            position_ids=position_ids,
-        )
+        with torch.no_grad():
+            outputs: BaseModelOutputWithPast = self.target_model.model(
+                input_ids=pruned_input_ids,
+                return_dict=True,
+                output_attentions=False,
+                output_hidden_states=False,
+                tree_attn_mask=tree_attn_mask,
+                position_ids=position_ids,
+            )
         hidden_states = outputs.last_hidden_state
 
         logits = self.target_model.lm_head(
@@ -651,16 +643,13 @@ class ServerSideVerification:
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(
             torch.tensor(self.tree_config)).item())
+        
         # for picking the longest path
         self.total_path = [[] for _ in range(self.total_num_path)]
-        prod_size = torch.cumprod(torch.tensor(
-            self.tree_config, dtype=torch.int, device=self.target_model_device), dim=0)
-        prod_size = torch.cat(
-            (torch.zeros(1).to(prod_size), prod_size)).tolist()
+        prod_size = torch.cumprod(torch.tensor(self.tree_config, dtype=torch.int, device=self.target_model_device), dim=0)
+        prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
         self.prod_size = prod_size
-        self.cumulative_prod_size = torch.cumsum(
-            torch.tensor(prod_size), dim=0
-        ).tolist()
+        self.cumulative_prod_size = torch.cumsum(torch.tensor(prod_size), dim=0).tolist()
 
         input_ids = input_ids.to(self.target_model_device)
         # logits, target_model_past_key_values = self._forward_target_model(
@@ -677,6 +666,7 @@ class ServerSideVerification:
         # use sampling no greedy.
         # TODO: what if there is nan in the ground_prob, how will it affect the verification?
         # FIXME: when and why does ground truth probability has nan?
+
         ground_probs = F.softmax(logits / (self.target_model_temp), dim=-1)
         # print(f"shape of ground_probs {ground_probs.shape}")
         keep_indices = list(range(self.init_input_length))
@@ -702,7 +692,6 @@ class ServerSideVerification:
                 current_layer_cand_prob_idx=cand_probs_idx
             )
             if len(current_ground_prob) == 0:
-
                 break
         # print(f"line 540: total path is {self.total_path}")
         # may want to consider a tie breaker for keep_indices
@@ -712,7 +701,6 @@ class ServerSideVerification:
             # print(f"***all rejected use initial probs {tail_ground_prob}\n")
             # means all candidate rejected
         else:
-
             longest_list_index = find_longest_list_index(self.total_path)
             if len(self.total_path[longest_list_index]) == self.max_draft_len:
                 to_drop_len = 1
@@ -728,8 +716,7 @@ class ServerSideVerification:
 
         # the to_drop_len is necessary here
         if to_drop_len != 0:
-            draft_keep_indices = keep_indices[: len(
-                keep_indices) - to_drop_len]
+            draft_keep_indices = keep_indices[: len(keep_indices) - to_drop_len]
         else:
             draft_keep_indices = keep_indices
 
