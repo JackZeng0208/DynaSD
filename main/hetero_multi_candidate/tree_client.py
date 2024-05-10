@@ -44,19 +44,20 @@ if __name__ == '__main__':
     #     client_id=args.client_id
     # )
     
-total_acceptace_rate = 0
-turns = 100
-for _ in range(turns):
-    output, acceptance_rate = client.edge_tree_attn_speculative_decoding(
-        draft_model=draft_model,
-        input_ids= input_ids,
-        server_ip=args.server_ip,
-        client_id= args.client_id,
-        max_len= 120)
-    total_acceptace_rate +=acceptance_rate
-    print(f'total time on communication: {client.get_time_spend_sending_message()}')
-    print(f'total time on target model forward: {client.get_time_spend_on_target_model_forward()}')
-    print(f'total time on draft model generation: {client.get_time_spend_on_draft_model_generation()}')
-    print(f'output is {draft_tokenizer.batch_decode(output)}\n')
+    total_acceptace_rate = 0
+    turns = 100
+    for _ in range(turns):
+        output, acceptance_rate = client.edge_tree_attn_speculative_decoding(
+            draft_model=draft_model,
+            input_ids= input_ids,
+            server_ip=args.server_ip,
+            client_id= args.client_id,
+            tree_config=(2,1,1),
+            max_len= 120)
+        total_acceptace_rate +=acceptance_rate
+        print(f'total time on communication: {client.get_time_spend_sending_message()}')
+        print(f'total time on target model forward: {client.get_time_spend_on_target_model_forward()}')
+        print(f'total time on draft model generation: {client.get_time_spend_on_draft_model_generation()}')
+        print(f'output is {draft_tokenizer.batch_decode(output)}\n')
 
-print(f"overall acceptace rate is {total_acceptace_rate/turns}")
+    print(f"overall acceptace rate is {total_acceptace_rate/turns}")

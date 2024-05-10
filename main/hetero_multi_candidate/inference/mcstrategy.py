@@ -257,7 +257,8 @@ class TreeStrategy(Strategy):
                 step_tree_attn_mask = torch.cat(
                     (context_attn_mask, step_tree_attn_self_mask), dim=1
                 )
-
+                print(f"current position_ids {position_ids}")
+                print(f"current context_attn_mask {step_tree_attn_mask.int()} ")
             outputs: BaseModelOutputWithPast = self.draft_model.model(
                 input_ids=pruned_input_ids,
                 use_cache=True,
@@ -276,7 +277,7 @@ class TreeStrategy(Strategy):
             else:
                 hidden_states = hidden_states[0]
             logits = self.draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
-
+            print(f"size of logits, the s shape should not be one B,s,v {logits.shape}")
             past_key_values = list(outputs.past_key_values)
 
             if self.draft_model_temp == 0:
@@ -299,6 +300,7 @@ class TreeStrategy(Strategy):
                 cand_tokens = torch.multinomial(
                     step_cand_probs, step_k, replacement=self.replacement
                 ).view(1, -1)
+            print(f"current step candidate tokens {cand_tokens} current step_k is {step_k}")
             cand_probs.append(step_cand_probs)
 
             pruned_input_ids = cand_tokens

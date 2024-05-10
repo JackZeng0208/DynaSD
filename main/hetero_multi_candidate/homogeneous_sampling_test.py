@@ -52,10 +52,10 @@ sentence_list = ["Write a story set in a post-apocalyptic world where humans are
 
 
 
-k_config_e = (2,2,2,1)
+k_config_e = (2,2,1)
 draft_model_temp=1
 target_model_temp=1
-max_new_tokens = 200
+max_new_tokens = 50
 
 acceptance_count = 0 #+= output.acceptance_count
 draft_token_count = 0#+= output.draft_token_count
@@ -79,7 +79,7 @@ draft_model.eval()
 target_model.eval()
 for i in tqdm(range(len(sentence_list))):
     
-    prompt = tokenizer(sentence_list[i],return_tensors="pt").to("cuda:0")
+    prompt = tokenizer('once upon a time',return_tensors="pt").to("cuda:0")
     input_ids = prompt.input_ids
 
     start_time = time.time()
@@ -91,7 +91,7 @@ for i in tqdm(range(len(sentence_list))):
     draft_token_count += output.draft_token_count
     invocation_count += output.invocation_count
     run_time = end_time - start_time
-    # break
+    break
 latency = run_time / (acceptance_count + invocation_count)
 acceptance_rate = acceptance_count / draft_token_count
 block_efficiency = 1 + acceptance_count / invocation_count

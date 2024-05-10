@@ -304,14 +304,14 @@ class HeteroSpeculativeDecoding:
                     target_logits = server_verifier.target_forward(
                         draft_tokens, tree_config=draft_tree_config)
                     finish_target_forward_time = time.time()
-
+                    # print(f"Target forward time is {finish_target_forward_time - target_forward_time}")
                     verification_time = time.time()
                     output = server_verifier.verify_longest_candidate_hetero(
                         input_ids=draft_tokens,
                         cand_probs=cand_probs,
                         logits=target_logits,)
                     end_verification_time = time.time()
-
+                    # print(f"verification time is {end_verification_time - verification_time}")
                 new_tokens = output.sequences
                 accepted_indices = output.draft_model_accept_indices
                 accept_count = output.acceptance_count
@@ -598,20 +598,22 @@ class ServerSideVerification:
         3. this can be used with dynamic tree 
         """
         self.tree_config = tree_config
-        self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
-            device=self.target_model_device)
         input_ids = input_ids.to(self.target_model_device)
-        tree_attn_len = self.tree_attn_self_mask.size(0)
-        init_input_length = input_ids.size(1) - tree_attn_len
-        pruned_input_ids = input_ids
-
-        tree_attn_mask = torch.zeros((input_ids.size(1), input_ids.size(1)),dtype=torch.bool,device=self.target_model_device)
-        mask_cond = torch.arange(tree_attn_mask.size(-1), device=self.target_model_device)
-        tree_attn_mask.masked_fill_(mask_cond < (mask_cond + 1).view(tree_attn_mask.size(-1), 1), 1)
-        tree_attn_mask[-tree_attn_len:, -tree_attn_len:] = self.tree_attn_self_mask
-        position_ids = tree_attn_mask.sum(dim=1) - 1
 
         with torch.no_grad():
+            self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
+                device=self.target_model_device)
+            print(self.tree_attn_self_mask)
+            tree_attn_len = self.tree_attn_self_mask.size(0)
+            init_input_length = input_ids.size(1) - tree_attn_len
+            pruned_input_ids = input_ids
+
+            tree_attn_mask = torch.zeros((input_ids.size(1), input_ids.size(1)), dtype=torch.bool, device=self.target_model_device)
+            mask_cond = torch.arange(tree_attn_mask.size(-1), device=self.target_model_device)
+            tree_attn_mask.masked_fill_(mask_cond < (mask_cond + 1).view(tree_attn_mask.size(-1), 1), 1)
+            tree_attn_mask[-tree_attn_len:, -tree_attn_len:] = self.tree_attn_self_mask
+            position_ids = tree_attn_mask.sum(dim=1) - 1
+
             outputs: BaseModelOutputWithPast = self.target_model.model(
                 input_ids=pruned_input_ids,
                 return_dict=True,
@@ -620,11 +622,12 @@ class ServerSideVerification:
                 tree_attn_mask=tree_attn_mask,
                 position_ids=position_ids,
             )
-        hidden_states = outputs.last_hidden_state
 
+        hidden_states = outputs.last_hidden_state
         logits = self.target_model.lm_head(
             hidden_states[:, -tree_attn_len - 1:]
         )  # 1 x seq_len x hidden_dim
+
         return logits
 
     def verify_longest_candidate_hetero(

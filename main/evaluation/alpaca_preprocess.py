@@ -2,7 +2,7 @@ from datasets import load_dataset
 import json
 import random
 
-def preprocess_alpaca_dataset(dataset, num_samples=5000, max_input_length=128):
+def preprocess_alpaca_dataset(dataset, num_samples=2100, max_input_length=128):
     data = dataset['train']
 
     processed_data = []

@@ -1,0 +1,1 @@
+False,all,"tensor(0.4172, device='cuda:0', dtype=torch.float16, grad_fn=<SelectBackward0>)","tensor(0.1201, device='cuda:0', dtype=torch.float16, grad_fn=<SelectBackward0>)"
