@@ -75,7 +75,7 @@ if __name__ == "__main__":
     dataset = load_dataset("mandarjoshi/trivia_qa", "rc.nocontext")
     dataset = dataset['validation']
     dataset = dataset.filter(lambda example: len(example["question"]) <= 128)
-    dataset = dataset['validation'].select([i for i in range(args.range[0], args.range[1])])
+    dataset = dataset.select([i for i in range(args.range[0], args.range[1])])
     acc_rate, speed = evaluate(dataset, args.model_name,
                            args.server_ip, args.port, args.client_id)
     with open(f"mcsd_benchmark_{os.getlogin()}_triviaQA.txt", 'w') as f:
