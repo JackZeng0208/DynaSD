@@ -250,7 +250,7 @@ class HeteroSpeculativeDecoding:
         pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-        with open(f"gpu_utilization_mcsd_131.txt", mode='w', newline='') as file:
+        with open(f"gpu_utilization_mcsd.txt", mode='w', newline='') as file:
             gpu_utilization = []
             def capture_gpu_utilization(stop_event):
                 # Adjust the sample interval as needed (in seconds) -> 1ms
