@@ -306,10 +306,16 @@ class HeteroSpeculativeDecoding:
                     finish_target_forward_time = time.time()
                     # print(f"Target forward time is {finish_target_forward_time - target_forward_time}")
                     verification_time = time.time()
-                    output = server_verifier.verify_longest_candidate_hetero(
+                    # output = server_verifier.verify_longest_candidate_hetero(
+                    #     input_ids=draft_tokens,
+                    #     cand_probs=cand_probs,
+                    #     logits=target_logits,)
+                    output = server_verifier.verify_longest_candidate_hetero_2_acceptances(
                         input_ids=draft_tokens,
-                        cand_probs=cand_probs,
-                        logits=target_logits,)
+                        cand_probs=None,
+                        logits=target_logits,
+                        use_typical_acceptance= True
+                    )
                     end_verification_time = time.time()
                     # print(f"verification time is {end_verification_time - verification_time}")
                 new_tokens = output.sequences
@@ -568,24 +574,52 @@ class ServerSideVerification:
         self.target_model_temp = target_model_temp
         self.target_model_device = target_model.model.get_input_embeddings().weight.device
 
+    # def new_verification(self,
+    #                      ground_probs: torch.FloatTensor,
+    #                      cand_probs: Tuple[torch.FloatTensor],
+    #                      cand_tokens: torch.LongTensor,
+    #                      ) -> Optional[int]:
+    #     """
+    #     previous verification may not return the longest sequence
+    #     1. this version will return the longest sequence, but this is not typical acceptance 
+    #     """
+    #     accepted_indices = []
+    #     cand_probs = cand_probs.to(ground_probs.device)
+    #     for check_idx, cand_token in enumerate(cand_tokens):
+    #         accept_threshold = ground_probs[cand_token] / \
+    #             cand_probs[cand_token]
+    #         if torch.rand(1, device=accept_threshold.device) <= accept_threshold:
+    #             accepted_indices.append(check_idx)
+    #         else:
+    #             # FIXME: why does this do?
+    #             ground_probs -= cand_probs
+    #             ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
+    #             ground_probs /= ground_probs.sum()
+    #     return accepted_indices
     def new_verification(self,
-                         ground_probs: torch.FloatTensor,
-                         cand_probs: Tuple[torch.FloatTensor],
-                         cand_tokens: torch.LongTensor,
-                         ) -> Optional[int]:
-        """
-        previous verification may not return the longest sequence
-        1. this version will return the longest sequence, but this is not typical acceptance 
-        """
+        ground_probs: torch.FloatTensor,
+        cand_probs: Tuple[torch.FloatTensor],
+        cand_tokens: torch.LongTensor,
+    ) -> Optional[int]:
         accepted_indices = []
         cand_probs = cand_probs.to(ground_probs.device)
         for check_idx, cand_token in enumerate(cand_tokens):
-            accept_threshold = ground_probs[cand_token] / \
-                cand_probs[cand_token]
+            accept_threshold = ground_probs[cand_token] / cand_probs[cand_token]
+            stats_keys = ['accepted','token','cand_prob','ground_prob']
+            path = '/home/iasl-transformers/UCI-IASL-Transformer/acceptance_relationship.csv'
             if torch.rand(1, device=accept_threshold.device) <= accept_threshold:
                 accepted_indices.append(check_idx)
+                
+                
+                with open(path,'a') as file:
+                    writer = csv.DictWriter(file,fieldnames= stats_keys)
+                    writer.writerow({'accepted':True,'token':tokenizer.decode(cand_token),'cand_prob':cand_probs[cand_token],'ground_prob':ground_probs[cand_token]})
+                print(f"accepted token: {tokenizer.decode(cand_token)} with probs: {cand_probs[cand_token]}, ground probs {ground_probs[cand_token]}")
             else:
-                # FIXME: why does this do?
+                with open(path,'a') as file:
+                    writer = csv.DictWriter(file,fieldnames= stats_keys)
+                    writer.writerow({'accepted':False,'token':tokenizer.decode(cand_token),'cand_prob':cand_probs[cand_token],'ground_prob':ground_probs[cand_token]})
+                print(f"*rejected token {tokenizer.decode(cand_token)} with probs: {cand_probs[cand_token]}, ground probs {ground_probs[cand_token]}")
                 ground_probs -= cand_probs
                 ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
                 ground_probs /= ground_probs.sum()
@@ -810,7 +844,164 @@ class ServerSideVerification:
         for _ in range(repeat):
             self.total_path[offset].append(idx)
             offset += 1
+    def update_total_path_tree_aware(self,
+        idx, 
+        idx_in_heap ,
+        depth,
+        reject_mode = False,
+        rejected_path = []):
 
+        repeat = 1
+        last_k = self.prod_size[-1]
+        repeat = int(last_k//self.prod_size[depth+1])
+        # print(f"what is self_prod size {self.prod_size}")
+        k = self.prod_size[depth+1]
+        p = self.cumulative_prod_size[depth +1]
+        # print(f'idx is {idx} and idx_in_heap is {idx_in_heap}, k is {k}, p is {p}, depth is {depth}, repeat is {repeat}')
+        first_idx = k - (p-idx_in_heap)
+        offset = first_idx*repeat
+        current_reject_pathes = []
+        for _ in range(repeat):
+            if (reject_mode):
+                if offset not in rejected_path:
+                    current_reject_pathes.append(offset)
+            else:
+                if(offset not in rejected_path):
+                    self.total_path[offset].append(idx)
+            offset+=1
+        return current_reject_pathes
+    
+    def verify_longest_candidate_hetero_2_acceptances(
+        self,
+        input_ids: torch.LongTensor,        
+        cand_probs: Optional[Tuple[torch.FloatTensor]],
+        logits,
+        use_typical_acceptance = False
+    ) -> DecoderOnlyVerificationOutput:
+        """
+        1. assume target forward is always called before verification 
+        2. therefore the tree_config is initialize in forward
+        """
+        ## prepare for heterogeneous 
+        self.cand_probs = cand_probs
+        # print(f"line 499 what is the tree_config {self.tree_config}")
+        self.max_draft_len = len(self.tree_config)
+        self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
+        self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
+        prod_size = torch.cumprod(torch.tensor(self.tree_config, dtype=torch.int,device=self.target_model_device), dim=0)
+        prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
+        self.prod_size = prod_size
+        self.cumulative_prod_size = torch.cumsum(
+            torch.tensor(prod_size), dim=0
+        ).tolist()
+        
+
+        input_ids = input_ids.to(self.target_model_device)
+        # logits, target_model_past_key_values = self._forward_target_model(
+        #     input_ids, target_model_past_key_values
+        # )
+        logits = logits[0]  # seq_len x hidden_dim
+        tree_attn_len = self.tree_attn_self_mask.size(0)
+        self.unverified_tokens = input_ids[0, -tree_attn_len:]
+        self.init_input_length = input_ids.size(1) - tree_attn_len
+        #TODO: what if there is nan in the ground_prob, how will it affect the verification? 
+        ground_probs = F.softmax(logits / (self.target_model_temp), dim=-1)
+        # print(f"shape of ground_probs {ground_probs.shape}")
+        keep_indices = list(range(self.init_input_length))
+        to_drop_len = 0
+
+        current_ground_prob = [ground_probs[0]]
+        init_ground_prob = ground_probs[0] # prepare for no candidate accepted
+        tail_ground_index = 0 # prepare for softmax produce nan case, use greedy argmax instead
+        ground_probs = ground_probs[1:]
+        idx_group_bias = [0]
+        cand_probs_idx = [0]
+        
+        if (use_typical_acceptance == False):
+            
+            for depth in range(self.max_draft_len):
+                current_ground_prob, idx_group_bias,cand_probs_idx  = self.verify_single_layer(
+                    depth = depth,
+                    ground_probs=ground_probs,
+                    idx_group_biases= idx_group_bias,
+                    verification_probs_list=current_ground_prob,
+                    current_layer_cand_prob_idx = cand_probs_idx
+                )
+                if len(current_ground_prob)  == 0 :
+                    break 
+        else: #using typical acceptance
+            # print(f"debug 741: shape of logits: {logits.shape}")
+            # print(f"debug 742: shape of self.unverified_tokens(candidates): {self.unverified_tokens.shape}")
+            accepted_mask = typical_acceptance_naive_tree_config(logits=logits,
+                                                                candidates=self.unverified_tokens,
+                                                                tree_config=self.tree_config)
+            
+            accepted_mask = accepted_mask.tolist()
+            accepted_mask = accepted_mask[0]
+            # print(f"what is the accepted_mask {accepted_mask}")
+            # need determine the depth base on the idx 
+            threshold = self.cumulative_prod_size[1:]
+            depth = 0
+            rejected_path = []
+            for i in range(len(accepted_mask)):
+                if (i >= threshold[depth] ):
+                    depth+=1
+                # print(f'check depth: {depth}, i is {i}')
+                idx = i + self.init_input_length
+                rejected_path.extend(self.update_total_path_tree_aware(
+                    idx=idx,
+                    idx_in_heap=i,
+                    depth=depth,
+                    reject_mode= True if accepted_mask[i] == 0 else False,
+                    rejected_path=rejected_path
+                ))
+                
+                    # TODO: need to be careful about the topology relationship 
+                    
+               
+                
+        print(f"self.total path is {self.total_path}")
+        if len(current_ground_prob) == 0:    
+            tail_ground_prob = init_ground_prob
+        else: 
+            longest_list_index = find_longest_list_index(self.total_path)
+            if (longest_list_index != None):
+                if len(self.total_path[longest_list_index]) == self.max_draft_len:
+                    to_drop_len= 1
+                    depth = self.max_draft_len
+                keep_indices.extend(self.total_path[longest_list_index])
+                tail_ground_index = self.total_path[longest_list_index][-1] - self.init_input_length
+                tail_ground_prob = ground_probs[tail_ground_index]
+            elif longest_list_index == None:
+                tail_ground_prob = init_ground_prob
+        keep_indices = torch.tensor(
+            keep_indices, dtype=torch.long, device=self.target_model_device
+        )
+
+        # the to_drop_len is necessary here
+        if to_drop_len != 0:
+            draft_keep_indices = keep_indices[: len(keep_indices) - to_drop_len]
+        else:
+            draft_keep_indices = keep_indices
+        
+        # tail_ground_prob = torch.softmax(tail_ground_prob,dim=-1)
+        if (torch.isnan(tail_ground_prob).any()):
+            tail_ground_token = torch.argmax(logits[tail_ground_index]).to(
+            device=input_ids.device)
+            tail_ground_token = tail_ground_token.unsqueeze(0)
+            print(f"has nan in probs {tail_ground_prob}, and picked token is {tail_ground_token}")
+        else:
+            tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
+                device=input_ids.device)
+        input_ids = input_ids.index_select(dim=1, index=keep_indices)
+        # print(f"shape of input_ids {input_ids.shape}, and  tail_ground_token {tail_ground_token}, tail_ground_token[None] {tail_ground_token[None]}")
+        input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)
+
+        return DecoderOnlyVerificationOutput(
+            sequences=input_ids,
+            draft_model_accept_indices = draft_keep_indices,
+            acceptance_count=depth,
+        )
 
 class EdgeSideTreeStrategyGeneration:
     def __init__(
