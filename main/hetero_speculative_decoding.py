@@ -1285,3 +1285,47 @@ class EdgeSideTreeStrategyGeneration:
                     real_child_idx = level_child_location + child_idx_base + child_idx_bais
                     idx_queue.append((depth+1,idx,real_child_idx))
         return attn_mask
+
+def tree_prob_repeat(tree_config = None):
+    prob_repeat = []
+    branch_in_prev_level = 1
+    for level in tree_config:
+        for _ in range(branch_in_prev_level):
+            prob_repeat.append(level)
+        branch_in_prev_level *= level
+    return prob_repeat
+
+"""
+usage see MCSD_experiment/inference_test.py
+"""
+def typical_acceptance_naive_tree_config(
+    logits, candidates, temperature =1 , posterior_alpha = 0.0001,tree_config = (2,2,1)
+):    
+    posterior_threshold = posterior_alpha**(0.5)
+    # change the logits according to tree-config: 
+    level_prod = torch.cumprod(torch.tensor(tree_config), dim=0)[:-1].sum().item()
+    posterior_prob = torch.softmax(logits / temperature, dim=-1)
+    verification_prob = posterior_prob[:level_prod+1,:]
+    repeat = tree_prob_repeat(tree_config=tree_config)
+    verification_prob= torch.repeat_interleave(verification_prob,repeats=torch.tensor(repeat,device="cuda:0"),dim=0)
+    # print(f"size of posterior_prob {posterior_prob.shape}")
+    # print(f"size of verification_prob {verification_prob.shape}")
+
+    ## get the probability 
+    candidates = candidates[None]
+    # print(f"debug: 967 posterior_prob shape {posterior_prob.shape}")
+    # print(f"debug: 968 candidates shape {candidates.shape}")
+    candidates_prob = torch.gather(
+        posterior_prob, dim=-1, index=candidates
+    )
+    # print(f'shape of candidates prob {candidates_prob.shape}')
+    posterior_entropy = -torch.sum(
+        verification_prob * torch.log(verification_prob + 1e-5), dim=-1
+    )  # torch.sum(torch.log(*)) is faster than torch.prod
+    threshold = torch.minimum(
+        torch.ones_like(posterior_entropy) * posterior_threshold,
+        torch.exp(-posterior_entropy) * posterior_alpha,
+    )
+    # print(f'shape of threshold {threshold.shape}')
+    posterior_mask = candidates_prob > threshold
+    return posterior_mask.int()
