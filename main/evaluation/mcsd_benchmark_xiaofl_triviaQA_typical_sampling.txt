@@ -1,0 +1,1 @@
+Acceptance Rate: 0.7560928868901997, Token Generation Speed: 26.005075498166136
