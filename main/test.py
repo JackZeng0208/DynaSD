@@ -1,40 +1,33 @@
 from datasets import load_dataset
-from transformers import AutoTokenizer
-from model.llama_tree_attn import LlamaForCausalLM
+from transformers import AutoTokenizer, LlamaForCausalLM
 from tqdm import tqdm
-from sd import SpeculativeDecoding, TreeAttentionSpeculativeDecoding
+# from sd import SpeculativeDecoding, TreeAttentionSpeculativeDecoding
 import argparse
-import os
+import time
 import torch
 
 def evaluate(dataset, draft_model_name, target_model_name, max_len, gamma, top_k, top_p):
     total = 0
-    draft_model = LlamaForCausalLM.from_pretrained(draft_model_name, torch_dtype=torch.float16)
-    draft_tokenizer = AutoTokenizer.from_pretrained(draft_model_name)
-    target_model = LlamaForCausalLM.from_pretrained(target_model_name, torch_dtype=torch.float16)
-
-    speculative_decoding = TreeAttentionSpeculativeDecoding()
-
-    total_acceptance_rate = 0
-    total_token_speed = 0
+    draft_model = LlamaForCausalLM.from_pretrained(draft_model_name, torch_dtype="auto").to("cuda:0")
+    target_tokenizer = AutoTokenizer.from_pretrained(target_model_name)
+    target_model = LlamaForCausalLM.from_pretrained(target_model_name, torch_dtype="auto").to("cuda:0")
     for example in tqdm(dataset):
         question = example["question"]
+        start_time = time.time()
         input_str = f"Question: {question}\nAnswer:"
-        input_ids = draft_tokenizer.encode(input_str, return_tensors='pt')
-        output, acceptance_rate, token_speed = speculative_decoding.tree_attn_speculative_decoding(
-            input_ids=input_ids,
-            draft_model=draft_model,
-            target_model=target_model,
-            tree_config=(3,2,1),
-            max_len=max_len,
-            # gamma=gamma,
-            top_k=top_k,
-            top_p=top_p
-        )
+        input_ids = target_tokenizer.encode(input_str, return_tensors='pt').to("cuda:0")
+        outputs = target_model.generate(input_ids, 
+                                        assistant_model=draft_model, 
+                                        do_sample=True, 
+                                        temperature=1,
+                                        max_new_tokens=max_len,
+                                        top_k=top_k,
+                                        top_p=top_p,)
+        # ans = target_tokenizer.decode(outputs, skip_special_tokens=True)
+        end_time = time.time()
+        print(f"Token Generation Speed: { (len(outputs[0]) - len(input_ids[0]))  / (end_time - start_time)}")
         total += 1
-        total_acceptance_rate += acceptance_rate
-        total_token_speed += token_speed
-
+        
     return total_acceptance_rate / total, total_token_speed / total
 
 if __name__ == "__main__":
@@ -61,9 +54,5 @@ if __name__ == "__main__":
     dataset = dataset['validation']
     dataset = dataset.filter(lambda example: len(example["question"]) <= 128)
     dataset = dataset.select([i for i in range(args.range[0], args.range[1])])
-
-    acc_rate, speed = evaluate(dataset, args.draft_model_name, args.target_model_name,
+    evaluate(dataset, args.draft_model_name, args.target_model_name,
                                args.max_len, args.gamma, args.top_k, args.top_p)
-
-    with open(f"speculative_decoding_benchmark_triviaQA.txt", 'w') as f:
-        f.write(f"Acceptance Rate: {acc_rate}, Token Generation Speed: {speed}")
