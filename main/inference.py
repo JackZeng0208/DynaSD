@@ -47,7 +47,7 @@ if __name__ == "__main__":
         "Speculative Decoding Evaluation")
     parser.add_argument("--draft_model_name", type=str, default="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
                         help="Draft model name")
-    parser.add_argument("--target_model_name", type=str, default="TheBloke/wizard-vicuna-13B-HF",
+    parser.add_argument("--target_model_name", type=str, default="meta-llama/Llama-2-7b-chat-hf",
                         help="Target model name")
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
