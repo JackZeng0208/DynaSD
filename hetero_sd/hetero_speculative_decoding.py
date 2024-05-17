@@ -250,16 +250,17 @@ class HeteroSpeculativeDecoding:
         pynvml.nvmlInit()
         device = torch.device("cuda:0")
         handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
-        with open(f"gpu_utilization_mcsd.txt", mode='w', newline='') as file:
-            gpu_utilization = []
-            def capture_gpu_utilization(stop_event):
+        with open(f"gpu_power_consumption_mcsd.txt", mode='w', newline='') as file:
+            gpu_power_usage = []
+            def capture_gpu_power_usage(stop_event):
                 # Adjust the sample interval as needed (in seconds) -> 1ms
                 sample_interval = 1
                 while not stop_event.is_set():
-                    utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
-                    # print(f"GPU utilization: {utilization}")
-                    gpu_utilization.append(utilization)
+                    power_usage = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000  # Convert from milliwatts to watts
+                    print(f"GPU power usage: {power_usage} W")
+                    gpu_power_usage.append(power_usage)
                     time.sleep(sample_interval)
+
             init_flag = True
             
             while True:
@@ -273,7 +274,7 @@ class HeteroSpeculativeDecoding:
                         # Stop capturing GPU utilization
                         stop_event.set()
                         gpu_thread.join()
-                        file.write(str(gpu_utilization))
+                        file.write(str(gpu_power_usage))
                         server_socket.send_pyobj("Close server")
                         server_socket.close()
                         exit()
@@ -283,7 +284,7 @@ class HeteroSpeculativeDecoding:
                 if init_flag:
                     # Start capturing GPU utilization in a separate thread
                     stop_event = threading.Event()
-                    gpu_thread = threading.Thread(target=capture_gpu_utilization, args=(stop_event,))
+                    gpu_thread = threading.Thread(target=capture_gpu_power_usage, args=(stop_event,))
                     gpu_thread.start()
                     init_flag = False
 
@@ -637,7 +638,7 @@ class ServerSideVerification:
         with torch.no_grad():
             self.tree_attn_self_mask = get_tree_attn_self_mask(self.tree_config).to(
                 device=self.target_model_device)
-            print(self.tree_attn_self_mask)
+            # print(self.tree_attn_self_mask)
             tree_attn_len = self.tree_attn_self_mask.size(0)
             init_input_length = input_ids.size(1) - tree_attn_len
             pruned_input_ids = input_ids
@@ -960,7 +961,7 @@ class ServerSideVerification:
                     
                
                 
-        print(f"self.total path is {self.total_path}")
+        # print(f"self.total path is {self.total_path}")
         if len(current_ground_prob) == 0:    
             tail_ground_prob = init_ground_prob
         else: 

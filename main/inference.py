@@ -46,7 +46,7 @@ if __name__ == "__main__":
                         help="Target model name")
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
-    parser.add_argument("--range", nargs=2, type=int, default=[0, 700],
+    parser.add_argument("--range", nargs=2, type=int, default=[0, 1000],
                         help="Range of dataset to evaluate")
     parser.add_argument("--max_len", type=int, default=128)
     parser.add_argument("--gamma", type=int, default=4)
@@ -65,5 +65,5 @@ if __name__ == "__main__":
     acc_rate, speed = evaluate(dataset, args.draft_model_name, args.target_model_name,
                                args.max_len, args.gamma, args.top_k, args.top_p)
 
-    with open(f"speculative_decoding_benchmark_triviaQA.txt", 'w') as f:
+    with open(f"modified_speculative_decoding_benchmark_triviaQA.txt", 'w') as f:
         f.write(f"Acceptance Rate: {acc_rate}, Token Generation Speed: {speed}")

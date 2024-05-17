@@ -16,12 +16,12 @@ from tqdm import tqdm
 from inference.mcstrategy import TreeStrategy
 
 
-draft_model_path = 'JackFram/llama-68m'
-# target_model_path = 'JackFram/llama-160m'
-target_model_path = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
-# target_model_path = 'meta-llama/Llama-2-7b-chat-hf'
+# draft_model_path = 'JackFram/llama-68m'
+# draft_model_path = 'JackFram/llama-160m'
+draft_model_path = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+target_model_path = 'meta-llama/Llama-2-7b-chat-hf'
 draft_model = LlamaForCausalLM.from_pretrained(
-        target_model_path,
+        draft_model_path,
         torch_dtype=torch.float16,
         # load_in_8bit = True,
         device_map=0,
@@ -52,10 +52,10 @@ sentence_list = ["Write a story set in a post-apocalyptic world where humans are
 
 
 
-k_config_e = (2,2,1)
+k_config_e = (3,2,1)
 draft_model_temp=1
 target_model_temp=1
-max_new_tokens = 50
+max_new_tokens = 100
 
 acceptance_count = 0 #+= output.acceptance_count
 draft_token_count = 0#+= output.draft_token_count
@@ -73,13 +73,14 @@ generator = SpeculativeGenerator(
         replacement=False,
         speculative_sampling=True,
         use_origin= False
+        
     )
 
 draft_model.eval()
 target_model.eval()
 for i in tqdm(range(len(sentence_list))):
     
-    prompt = tokenizer('once upon a time',return_tensors="pt").to("cuda:0")
+    prompt = tokenizer(sentence_list[0],return_tensors="pt").to("cuda:0")
     input_ids = prompt.input_ids
 
     start_time = time.time()
@@ -107,36 +108,38 @@ print(f"Running time: {run_time} s")
 print(f"Token latency: {latency * 1000} ms")
 print(f"Acceptance rate: {acceptance_rate}")
 print(f"Block efficiency: {block_efficiency}")
-print(f'token per second is {max_new_tokens/run_time}')
+print(f'token per second is {output.sequences.shape[1]/run_time}')
 
 
 
-## sanity check
+# sanity check
 # draft_model_path = 'JackFram/llama-68m'
-# # target_model_path = 'JackFram/llama-160m'
-# target_model_path = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
-# # target_model_path = 'meta-llama/Llama-2-7b-chat-hf'
+# target_model_path = 'JackFram/llama-160m'
+# draft_model_path = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+# target_model_path = 'meta-llama/Llama-2-7b-chat-hf'
 # draft_model = AutoModelForCausalLM.from_pretrained(
-#         target_model_path,
+#         draft_model_path,
 #         torch_dtype=torch.float16,
 #         # load_in_8bit = True,
-#         device_map=0,
-#         use_flash_attention_2= False,
+#         # device_map=0,
+#         # use_flash_attention_2= False,
 #     )
 
 # target_model = AutoModelForCausalLM.from_pretrained(
 #         target_model_path,
 #         torch_dtype=torch.float16,
 #         # load_in_8bit = True,
-#         device_map=0,
-#         use_flash_attention_2= False,
+#         # device_map=0,
+#         # use_flash_attention_2= False,
 #     )
+# target_model.cuda()
+# draft_model.cuda()
 # tokenizer = AutoTokenizer.from_pretrained(draft_model_path)
 # prompt = tokenizer(sentence_list[0],return_tensors="pt").to("cuda:0")
 # input_ids = prompt.input_ids
-# max_new_tokens = 200
+# max_new_tokens = 100
 # start_time = time.time()
 # output = target_model.generate(input_ids,assistant_model =draft_model,max_new_tokens =max_new_tokens )
 # end_time = time.time()
 # print(f'output is {tokenizer.batch_decode(output)}')
-# print(f'number / token is {max_new_tokens/(end_time - start_time)}')
+# print(f'number / token is {output.shape[1]/(end_time - start_time)}')

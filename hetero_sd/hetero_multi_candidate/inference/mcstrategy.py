@@ -257,8 +257,8 @@ class TreeStrategy(Strategy):
                 step_tree_attn_mask = torch.cat(
                     (context_attn_mask, step_tree_attn_self_mask), dim=1
                 )
-                print(f"current position_ids {position_ids}")
-                print(f"current context_attn_mask {step_tree_attn_mask.int()} ")
+                # print(f"current position_ids {position_ids}")
+                # print(f"current context_attn_mask {step_tree_attn_mask.int()} ")
             outputs: BaseModelOutputWithPast = self.draft_model.model(
                 input_ids=pruned_input_ids,
                 use_cache=True,
@@ -277,7 +277,7 @@ class TreeStrategy(Strategy):
             else:
                 hidden_states = hidden_states[0]
             logits = self.draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
-            print(f"size of logits, the s shape should not be one B,s,v {logits.shape}")
+            # print(f"size of logits, the s shape should not be one B,s,v {logits.shape}")
             past_key_values = list(outputs.past_key_values)
 
             if self.draft_model_temp == 0:
@@ -300,7 +300,7 @@ class TreeStrategy(Strategy):
                 cand_tokens = torch.multinomial(
                     step_cand_probs, step_k, replacement=self.replacement
                 ).view(1, -1)
-            print(f"current step candidate tokens {cand_tokens} current step_k is {step_k}")
+            # print(f"current step candidate tokens {cand_tokens} current step_k is {step_k}")
             cand_probs.append(step_cand_probs)
 
             pruned_input_ids = cand_tokens
@@ -410,7 +410,7 @@ class TreeStrategy(Strategy):
 
         # check for empty acceptance
         before_check = len(keep_indices)
-        print(f"what is the self max len {self.max_draft_len}")
+        # print(f"what is the self max len {self.max_draft_len}")
         for depth in range(self.max_draft_len):
             idx_base = self.cumulative_prod_size[depth] + idx_group_bias
             accept_idx_bias = self.acceptance_check(
@@ -432,9 +432,10 @@ class TreeStrategy(Strategy):
                 break
         after_check = len(keep_indices)
         if (before_check == after_check):
-            print("None acceptance")
+            pass
+            # print("None acceptance")
         # print(f"shape of cumulative_prod_size {self.cumulative_prod_size}")
-        print(f"depth: {depth} is num accepted shape of keep_indices {len(keep_indices)}")
+        # print(f"depth: {depth} is num accepted shape of keep_indices {len(keep_indices)}")
         keep_indices = torch.tensor(
             keep_indices, dtype=torch.long, device=self.target_model_device
         )
@@ -523,16 +524,17 @@ class TreeStrategy(Strategy):
         self.tree_config = tree_config
         self.max_draft_len = len(self.tree_config)
         self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
-        print(f"what is total_num_path is {self.total_num_path}")
+        # print(f"what is total_num_path is {self.total_num_path}")
         self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
         
         prod_size = torch.cumprod(torch.tensor(self.tree_config, dtype=torch.int,device=self.target_model_device), dim=0)
         prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
         self.prod_size = prod_size
+        # print(f"self.prod_size {self.prod_size }")
         self.cumulative_prod_size = torch.cumsum(
             torch.tensor(prod_size), dim=0
         ).tolist()
-
+        # print(f"self.cumulative_prod_size {self.cumulative_prod_size }")
         input_ids = input_ids.to(self.target_model_device)
         logits, target_model_past_key_values = self._forward_target_model(
             input_ids, target_model_past_key_values
@@ -565,7 +567,7 @@ class TreeStrategy(Strategy):
 
                 break 
             
-        print(f"self.total_path: {self.total_path}")
+        # print(f"self.total_path: {self.total_path}")
         # may want to consider a tie breaker for keep_indices 
         if len(current_ground_prob) == 0:
             tail_ground_prob = init_ground_prob
@@ -657,7 +659,7 @@ class TreeStrategy(Strategy):
                     global_idx = idx_base + accept_idx_bias
                     next_layer_ground_probs.append(ground_probs[global_idx])
                     # update self.total_path
-
+                    # print(f"what is the global_indx: {global_idx}, and what is the idx {self.init_input_length + global_idx}")
                     self.update_total_path(idx=self.init_input_length + global_idx,
                     idx_in_heap= global_idx,
                     depth=depth)
@@ -691,7 +693,173 @@ class TreeStrategy(Strategy):
             self.total_path[offset].append(idx)
             offset+=1
         
+    def verify_longest_candidate_hetero_2_acceptances(
+        self,
+        input_ids: torch.LongTensor,        
+        cand_probs: Optional[Tuple[torch.FloatTensor]],
+        logits,
+        use_typical_acceptance = True
+    ) -> DecoderOnlyVerificationOutput:
+        """
+        1. assume target forward is always called before verification 
+        2. therefore the tree_config is initialize in forward
+        """
+        ##FIXME: delete later
+        self.tree_config = (2,2,1)
+        ## prepare for heterogeneous 
+        self.cand_probs = cand_probs
+        # print(f"line 499 what is the tree_config {self.tree_config}")
+        self.max_draft_len = len(self.tree_config)
+        self.total_num_path = int(torch.prod(torch.tensor(self.tree_config)).item())
+        self.total_path = [[] for _ in range(self.total_num_path)] # for picking the longest path
+        prod_size = torch.cumprod(torch.tensor(self.tree_config, dtype=torch.int,device=self.target_model_device), dim=0)
+        prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
+        self.prod_size = prod_size
+        self.cumulative_prod_size = torch.cumsum(
+            torch.tensor(prod_size), dim=0
+        ).tolist()
+        
 
+        input_ids = input_ids.to(self.target_model_device)
+        # logits, target_model_past_key_values = self._forward_target_model(
+        #     input_ids, target_model_past_key_values
+        # )
+        logits = logits[0]  # seq_len x hidden_dim
+        tree_attn_len = self.tree_attn_self_mask.size(0)
+        self.unverified_tokens = input_ids[0, -tree_attn_len:]
+        self.init_input_length = input_ids.size(1) - tree_attn_len
+        #TODO: what if there is nan in the ground_prob, how will it affect the verification? 
+        ground_probs = torch.softmax(logits / (self.target_model_temp), dim=-1)
+        # print(f"shape of ground_probs {ground_probs.shape}")
+        keep_indices = list(range(self.init_input_length))
+        to_drop_len = 0
+
+        current_ground_prob = [ground_probs[0]]
+        init_ground_prob = ground_probs[0] # prepare for no candidate accepted
+        tail_ground_index = 0 # prepare for softmax produce nan case, use greedy argmax instead
+        ground_probs = ground_probs[1:]
+        idx_group_bias = [0]
+        cand_probs_idx = [0]
+        
+        if (use_typical_acceptance == False):
+            
+            for depth in range(self.max_draft_len):
+                current_ground_prob, idx_group_bias,cand_probs_idx  = self.verify_single_layer(
+                    depth = depth,
+                    ground_probs=ground_probs,
+                    idx_group_biases= idx_group_bias,
+                    verification_probs_list=current_ground_prob,
+                    current_layer_cand_prob_idx = cand_probs_idx
+                )
+                if len(current_ground_prob)  == 0 :
+                    break 
+        else: #using typical acceptance
+            accepted_mask = typical_acceptance_naive_tree_config(logits=logits,
+                                                                candidates=self.unverified_tokens,
+                                                                tree_config=self.tree_config)
+            # need determine the depth base on the idx 
+            threshold = self.cumulative_prod_size[1:]
+            depth = 0
+            for i in range(len(accepted_mask)):
+                if (i >= threshold[depth] ):
+                    depth+=1
+                if accepted_mask[i] == 1:
+                    
+                    idx = i + self.init_input_length
+                    self.update_total_path(idx = idx, idx_in_heap= i, depth=depth)
+                #1. need get the depth
+                #2. need get the idx 
+                #3. need get the global idx 
+                if accepted_mask[i] == 0: #reject 
+                    # TODO: need to be careful about the topology relationship 
+                    # need a whole branch not leaf!!!
+                    pass
+                else:
+                    # update the total path 
+                    pass
+                pass
+                
+        # print(f"using typical acceptance the self.total_path {self.total_path}")
+        if len(current_ground_prob) == 0:    
+            tail_ground_prob = init_ground_prob
+        else: 
+            longest_list_index = find_longest_list_index(self.total_path)
+            if len(self.total_path[longest_list_index]) == self.max_draft_len:
+                to_drop_len= 1
+                depth = self.max_draft_len
+            keep_indices.extend(self.total_path[longest_list_index])
+            tail_ground_index = self.total_path[longest_list_index][-1] - self.init_input_length
+            tail_ground_prob = ground_probs[tail_ground_index]
+        keep_indices = torch.tensor(
+            keep_indices, dtype=torch.long, device=self.target_model_device
+        )
+
+        # the to_drop_len is necessary here
+        if to_drop_len != 0:
+            draft_keep_indices = keep_indices[: len(keep_indices) - to_drop_len]
+        else:
+            draft_keep_indices = keep_indices
+        
+        # tail_ground_prob = torch.softmax(tail_ground_prob,dim=-1)
+        if (torch.isnan(tail_ground_prob).any()):
+            tail_ground_token = torch.argmax(logits[tail_ground_index]).to(
+            device=input_ids.device)
+            tail_ground_token = tail_ground_token.unsqueeze(0)
+            print(f"has nan in probs {tail_ground_prob}, and picked token is {tail_ground_token}")
+        else:
+            tail_ground_token = torch.multinomial(tail_ground_prob, num_samples=1).to(
+                device=input_ids.device)
+        input_ids = input_ids.index_select(dim=1, index=keep_indices)
+        # print(f"shape of input_ids {input_ids.shape}, and  tail_ground_token {tail_ground_token}, tail_ground_token[None] {tail_ground_token[None]}")
+        input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)
+
+        return DecoderOnlyVerificationOutput(
+            sequences=input_ids,
+            draft_model_accept_indices = draft_keep_indices,
+            acceptance_count=depth,
+        )
+
+def tree_prob_repeat(tree_config = None):
+    prob_repeat = []
+    branch_in_prev_level = 1
+    for level in tree_config:
+        for _ in range(branch_in_prev_level):
+            prob_repeat.append(level)
+        branch_in_prev_level *= level
+    return prob_repeat
+
+
+"""
+usage see MCSD_experiment/inference_test.py
+"""
+def typical_acceptance_naive_tree_config(
+    logits, candidates, temperature =1 , posterior_alpha = 0.0001,tree_config = (2,2,1)
+):    
+    posterior_threshold = posterior_alpha**(0.5)
+    # change the logits according to tree-config: 
+    level_prod = torch.cumprod(torch.tensor(tree_config), dim=0)[:-1].sum().item()
+    posterior_prob = torch.softmax(logits / temperature, dim=-1)
+    verification_prob = posterior_prob[:level_prod+1,:]
+    repeat = tree_prob_repeat(tree_config=tree_config)
+    verification_prob= torch.repeat_interleave(verification_prob,repeats=torch.tensor(repeat,device="cuda:0"),dim=0)
+    # print(f"size of posterior_prob {posterior_prob.shape}")
+    # print(f"size of verification_prob {verification_prob.shape}")
+
+    ## get the probability 
+    candidates_prob = torch.gather(
+        posterior_prob, dim=-1, index=candidates
+    )
+    # print(f'shape of candidates prob {candidates_prob.shape}')
+    posterior_entropy = -torch.sum(
+        verification_prob * torch.log(verification_prob + 1e-5), dim=-1
+    )  # torch.sum(torch.log(*)) is faster than torch.prod
+    threshold = torch.minimum(
+        torch.ones_like(posterior_entropy) * posterior_threshold,
+        torch.exp(-posterior_entropy) * posterior_alpha,
+    )
+    # print(f'shape of threshold {threshold.shape}')
+    posterior_mask = candidates_prob > threshold
+    return posterior_mask.int()
 # def recover_tree(k_config, sentence:str, sequence):
 #     input_tokens = tokenizer(sentence).input_ids
 #     offset = len(input_tokens)

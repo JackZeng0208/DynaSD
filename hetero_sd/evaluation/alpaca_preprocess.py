@@ -11,7 +11,7 @@ def preprocess_alpaca_dataset(dataset, num_samples=2100, max_input_length=128):
         input_text = item['input'].strip() if item['input'] else ''
         combined_text = ""
         if input_text == '':
-            combined_text = f"Instruction: {instruction}\nAnswer:"
+            combined_text = {"question": instruction, "": input_text, "answer": ""}
         else:
             combined_text = f"Instruction: {instruction}\nInput: {input_text}\nAnswer:".strip()
         

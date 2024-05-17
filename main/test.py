@@ -39,7 +39,7 @@ if __name__ == "__main__":
                         help="Target model name")
     parser.add_argument("--dataset", type=str, default="mandarjoshi/trivia_qa",
                         help="Huggingface dataset name (ex: mandarjoshi/trivia_qa)")
-    parser.add_argument("--range", nargs=2, type=int, default=[0, 700],
+    parser.add_argument("--range", nargs=2, type=int, default=[0, 1000],
                         help="Range of dataset to evaluate")
     parser.add_argument("--max_len", type=int, default=128)
     parser.add_argument("--gamma", type=int, default=4)
