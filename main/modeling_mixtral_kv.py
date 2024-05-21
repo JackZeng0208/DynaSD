@@ -22,7 +22,7 @@ import inspect
 import math
 import warnings
 from typing import List, Optional, Tuple, Union
-from .kv_cache import KVCache
+from kv_cache import KVCache
 
 import torch
 import torch.nn.functional as F

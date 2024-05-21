@@ -9,8 +9,9 @@ from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from transformers.modeling_outputs import ModelOutput
 
-from .utils import prepare_logits_processor, generate_tree_buffers, initialize_tree
-from .ea_model import EaModel
+from utils import prepare_logits_processor, generate_tree_buffers, initialize_tree
+from ea_model import EaModel
+from choices import mc_sim_7b_63
 
 @dataclass
 class DecoderOnlyDraftOutput(ModelOutput):
@@ -227,6 +228,7 @@ def evaluate(dataset, base_model_path, ea_model_path, tree_choice):
         low_cpu_mem_usage=True,
         device_map="auto"
     )
+    model.eval()
     tokenizer = model.get_tokenizer()
     for example in tqdm(dataset):
         question = example["question"]
@@ -250,9 +252,4 @@ if __name__ == "__main__":
     dataset = load_dataset(args.dataset, "rc.nocontext")['validation']
     dataset = dataset.filter(lambda example: len(example["question"]) <= 128)
     dataset = dataset.select([i for i in range(args.range[0], args.range[1])])
-
-    mc_sim_7b_63 = [[0],[1],[2],[3],[0,0],[0,1],[0,2],[1,0],[1,1],[2,0],[2,1],[3,0]
-                ,[0,0,0],[0,0,1],[0,0,2],[0,1,0],[0,1,1],[0,2,0],[0,2,1],[1,0,0],
-                [0,0,0,0],[0,0,0,1],[0,0,0,2],[0,0,0,0,0],[0,0,0,0,1]]
-    
     evaluate(dataset, args.base_model_path, args.ea_model_path, mc_sim_7b_63)
