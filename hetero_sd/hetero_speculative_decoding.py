@@ -97,7 +97,6 @@ class HeteroSpeculativeDecoding:
         self.stats = stats
 
     def get_time_spend_on_draft_model_generation(self):
-
         return self.time_spend_on_draft_model_generation
 
     def get_time_spend_on_target_model_forward(self):
