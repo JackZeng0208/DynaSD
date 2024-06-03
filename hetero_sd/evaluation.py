@@ -2,9 +2,6 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from model.llama_tree_attn import LlamaForCausalLM
 from tqdm import tqdm
-from collections import Counter
-import re
-import string
 from hetero_speculative_decoding import HeteroSpeculativeDecoding
 import argparse
 import os
