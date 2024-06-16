@@ -1,6 +1,9 @@
+# Copy from https://github.com/feifeibear/LLMSpeculativeSampling/blob/main/sampling/utils.py
 import torch
 from torch.nn import functional as F
 import csv
+import torch
+from torch.distributions import Categorical
 
 # copy from https://github.com/LeeSinLiang/microGPT/blob/ed40cf9780dbeb180adfe94c227d4aa97e69250e/gpt.py
 def top_k_top_p_filter(logits: torch.Tensor, top_k: int = 0, top_p: float = 0.0):
@@ -66,16 +69,14 @@ def max_fn(x):
     x_max_sum = torch.sum(x_max, dim=1, keepdim=True) 
     return x_max / x_max_sum
 
-def collect_training_data(candidate_dist,accepted:bool):
-    file_name = "/home/iasl-transformers/UCI-IASL-Transformer/naive_speculative_decoding_dynamic_depth/training_data.csv"
-    fieldnames = ["accepted","cand_entropy"]
-    with open(file_name, mode='a', newline='') as file:
+def collect_training_data(candidate_dist,token,accepted:bool,cand_prob, file_path:str): 
+    fieldnames = ["accepted","cand_entropy","token","cand_prob"]
+    with open(file_path, mode='a', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
 
         # Write the header if the file is empty
         if file.tell() == 0:
             writer.writeheader()
-
+        candidate_entropy = Categorical(probs = candidate_dist).entropy()
         # Write the dictionary to the CSV file
-        writer.writerow({"accepted":accepted,"candidate_dist":candidate_dist})
-    
+        writer.writerow({"accepted":accepted,"cand_entropy":candidate_entropy.item(),"token":token.item(),"cand_prob":cand_prob.item()})     

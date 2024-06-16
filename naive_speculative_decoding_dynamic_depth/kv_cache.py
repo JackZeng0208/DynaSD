@@ -1,15 +1,13 @@
 import torch
 from typing import Optional
-
+import numpy as np
 from spec_utils import norm_logits, sample
-# from transformers.models.bloom.modeling_bloom import BloomForCausalLM
 
 def _debug_show_kvcache(past_key_values):
     if  past_key_values is None:
         return
     for elem in past_key_values:
         k, v = elem
-        print(f"kv cache: k shape {k.shape}, v shape {v.shape}")
         break
 
 class KVCacheModel():
@@ -24,7 +22,8 @@ class KVCacheModel():
 
     def _forward_with_kvcache(self, input_ids : torch.Tensor, use_debug = True) -> torch.Tensor:
         if self._past_key_values is None:
-            assert self._prob_history is None, f"{self._prob_history.shape}"
+            # FIXME: 
+            # assert self._prob_history is None, f"{self._prob_history.shape}" # remove this temporarly
             # the first forward (prefill) returns the prompt's logits
             outputs = self._model(input_ids)
             self._prob_history = outputs.logits
@@ -60,7 +59,7 @@ class KVCacheModel():
             
             last_q = not_cached_q[:, -1, :]
             self._past_key_values = outputs.past_key_values
-        
+            print(f"kv-cache line 62, shape of past_key_value {np.shape(self._past_key_values)}")
         return last_q
 
 
@@ -81,11 +80,14 @@ class KVCacheModel():
         for _ in range(gamma):
             q = self._forward_with_kvcache(x, use_debug)
             next_tok = sample(q)
+            if (x.shape[0] > 1): # means multi-batch
+                b,t_n = next_tok.shape[0],next_tok.shape[1]
+                next_tok = next_tok.view(t_n,b)
             x = torch.cat((x, next_tok), dim=1)
         return x
 
     @torch.no_grad()
-    def generate(self, input : torch.Tensor, gamma : int) -> torch.Tensor:
+    def generate(self, input : torch.Tensor, gamma : int,batched = False) :
         output = self._generate_with_kvcache(input, gamma)
         return output
     

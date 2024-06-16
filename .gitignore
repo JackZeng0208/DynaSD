@@ -1,2 +1,3 @@
-/Heterogeneous Speculative Decoding/__pycache__
-.idea
+decision_model
+__pycache__
+naive_speculative_decoding_dynamic_depth/__pycache__
