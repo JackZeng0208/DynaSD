@@ -1,6 +1,3 @@
-# from single_batch_beam import *
-# from single_batch_beam import target_first_speculative_decoding, speculative_sampling
-
 from speculative_sampling import* 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch

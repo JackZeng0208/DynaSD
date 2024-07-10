@@ -29,7 +29,7 @@ class decision_model(nn.Module):
     def forward(self, x):
         return self.fc(x)
     
-def test_model(test_loader, model, weight_path='/home/iasl-transformers/UCI-IASL-Transformer/naive_speculative_decoding_dynamic_depth/decision_model.pth'):
+def test_model(test_loader, model, weight_path='/home/iasl-transformers/UCI-IASL-Transformer/decision_model/decision_model.pth'):
     model.load_state_dict(torch.load(weight_path))
     model.eval()
     correct = 0
@@ -57,7 +57,7 @@ def prepare_data(file_path, test_size=0.2, val_size=0.1):
 
     return test_dataset
 if __name__ == "__main__":
-    file_path = "/home/iasl-transformers/UCI-IASL-Transformer/naive_speculative_decoding_dynamic_depth/training_data_piqa.csv"
+    file_path = "/home/iasl-transformers/UCI-IASL-Transformer/decision_model/training_data_piqa.csv"
     test_dataset = prepare_data(file_path)
     
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
