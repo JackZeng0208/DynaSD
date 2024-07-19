@@ -19,21 +19,20 @@ class DecoderOnlyDraftOutput(ModelOutput):
 
 @dataclass
 class DecoderOnlyVerificationOutput(ModelOutput):
-    """
-    Base class for verification outputs of decoder-only generation models using speculative decoding.
-    """
-
+#    Base class for verific
     sequences: torch.LongTensor = None
     target_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     draft_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     acceptance_count: Optional[int] = None
 
 
-def _MCNS(
+def _MCNS(#ation outputs of decoder-only generation models using speculative decoding.
+
+
     ground_probs: torch.FloatTensor,
     cand_probs: Tuple[torch.FloatTensor],
     cand_tokens: torch.LongTensor,
-) -> Optional[int]:
+)-> Optional[int]:
     ground_token = torch.multinomial(ground_probs, num_samples=1).item()
 
     for check_idx, cand_token in enumerate(cand_tokens):

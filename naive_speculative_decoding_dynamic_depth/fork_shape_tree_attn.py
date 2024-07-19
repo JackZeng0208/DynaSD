@@ -3,7 +3,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import warnings
 from dataclasses import dataclass
 from typing import Callable, List, Literal, Optional, Tuple, Union
-
+import torch.nn as nn
+import pandas as pd
 import torch
 from transformers.modeling_outputs import BaseModelOutputWithPast, ModelOutput
 
@@ -42,7 +43,18 @@ def get_tree_attn_self_mask(max_config: Tuple[int]):
                 idx_queue.append((depth + 1, idx, real_child_idx))
     return attn_mask
 
+class decision_model(nn.Module):
+    def __init__(self):
+        super(decision_model, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(2, 16),
+            nn.ReLU(),
+            nn.Linear(16, 1),
+            nn.Sigmoid()
+        )
 
+    def forward(self, x):
+        return self.fc(x)
 
 
 class NewTreeStrategy:
@@ -51,18 +63,24 @@ class NewTreeStrategy:
         draft_model,
         target_model,
         eos_token_id: int,
-        max_config,
+        config_width = 6,
+        config_dpeth = 10,
+        using_decision_model = True,
         max_new_tokens: int = 200,
+        decision_threshold = 0.5,
+        greedy = False,
         
         draft_model_temp: float = 0,
         target_model_temp: float = 0,
+        decision_model_path: str = "/home/iasl-transformers/UCI-IASL-Transformer/decision_model/decision_model.pth",
     ) -> None:
         """
         so the max_config here could be 5 in width and 10 in depth 
         """
+        self.greedy = greedy
         self.max_new_tokens = max_new_tokens
         self.eos_token_id = eos_token_id
-        self.max_config = max_config
+        self.max_config = self.generate_fork_config(width=config_width,depth=config_dpeth)
         self.draft_model = draft_model
         self.target_model = target_model
         self.draft_model_device = draft_model.model.get_input_embeddings().weight.device
@@ -72,12 +90,9 @@ class NewTreeStrategy:
         self.max_draft_len = len(self.max_config)-1
         self.draft_model_temp = draft_model_temp
         self.target_model_temp = target_model_temp
-        self.target_past_key_values = None
+        self.target_pastjkey_values = None
         self.draft_past_key_values = None
 
-
-
-        
         prod_size = torch.cumprod(torch.tensor(self.max_config, dtype=torch.int), dim=0)
         prod_size = torch.cat((torch.zeros(1).to(prod_size), prod_size)).tolist()
         self.prod_size = prod_size
@@ -88,7 +103,33 @@ class NewTreeStrategy:
         self.tree_attn_self_mask = get_tree_attn_self_mask(self.max_config).to(
             device=self.draft_model_device
         )
-        # print(f"check the tree attn self mask {self.tree_attn_self_mask.int()}, shpe is {self.tree_attn_self_mask.shape}")
+
+        ## for decision model 
+        self.using_decision_model = using_decision_model
+        self.decision_model = decision_model()
+        self.decision_model.load_state_dict(torch.load(decision_model_path))
+        self.decision_model.cuda()
+        self.decision_model.eval()
+        self.stop_generation = False
+        self.continue_depth = 0 
+        self.decision_threshold = decision_threshold
+        self.dynamic_target_mask =None
+
+        # stats collection
+        
+        self.stats = {'token/second': 0.0,'ground_acceptance_count': 0,
+                       "draft_generation_time":0.0, "verification_time":0.0, 
+                       "total_generation_round":0, "decision_model_time":0.0, 
+                       "decision_acceptance_count":0}
+    
+    def generate_fork_config(self,width,depth):
+        config = []
+        config.append(width)
+        for _ in range(depth):
+            config.append(1)
+        return config
+    
+    
     def determine_num_batch(self,target_dist ):
         # need to dynamically deter mine the lower bound of k with eta sampling 
         # top_k_probs, top_k_indices = torch.topk(torch.softmax(target_dist, dim=-1), upper_bound)
@@ -101,9 +142,7 @@ class NewTreeStrategy:
     
 
     def generation_loop(self,
-                        input_ids):
-        stats = {'token/second': 0.0,'accept_count': 0,"total_generation_count":0, "draft_generation_time":0.0}
-        start = time.time()
+                        input_ids,):
         input_ids = input_ids.to(self.draft_model_device)
         non_change_input_len = input_ids.size(-1)
         init_input_len = input_ids.size(-1)
@@ -133,7 +172,6 @@ class NewTreeStrategy:
         # using the draft model just to get the past_key_values
         # TODO: however there is better way of modifying the attention mask , refer the 
         # init step of target forward
-        draft_model_start = time.time()
         draft_output = self.draft_model.model(
             input_ids = input_ids,
             use_cache=True,
@@ -143,47 +181,59 @@ class NewTreeStrategy:
             output_hidden_states=False,
             position_ids=None,
         )
-        draft_model_end = time.time()
         self.draft_past_key_values = list(draft_output.past_key_values)
         # pruned_input_ids = multi_candid_token[:, self.draft_past_key_values[0][0].size(2) :]
         while True:
-            input_ids, cand_probs, draft_depth = self.generate_draft(multi_candid_token,init_input_len)
-            target_ground_prob, depth, input_ids = self.greedy_verify(input_ids)
-            stats['total_generation_count'] += draft_depth
-            stats['accept_count'] += depth
+            self.stats['total_generation_round'] += 1
+
+            draft_model_start = time.time()
+            input_ids, cand_probs = self.generate_draft(multi_candid_token,init_input_len)
+            draft_model_end = time.time()
+            self.stats['draft_generation_time'] += draft_model_end - draft_model_start
+            # print(f"input ids shape is {input_ids.shape}, self.continue depth is {self.continue_depth}")
+            # return
+            verification_start = time.time()
+            if not self.greedy:
+                target_ground_prob, accepted_depth, input_ids =self.speculative_sampling(input_ids,cand_probs)
+            else:
+                target_ground_prob, accepted_depth, input_ids = self.greedy_verify(input_ids)
+            verification_end = time.time()
+            self.stats['verification_time']+= verification_end - verification_start
+            self.stats['decision_acceptance_count'] += self.continue_depth
+            self.stats['ground_acceptance_count'] += accepted_depth
             if (
-                self.eos_token_id in input_ids[0, -self.max_draft_len :]
+                self.eos_token_id in input_ids[0, -(self.continue_depth+1) :]
                 or input_ids.size(-1) - non_change_input_len >= self.max_new_tokens
             ):
                 break
+            # 🤔 change latter, hot fix for current cuda error 
+            # if (input_ids.size(-1) - non_change_input_len >= self.max_new_tokens):
+            #     break
             init_input_len = input_ids.size(-1)
             target_probs, batch_tokens = self.determine_num_batch(target_ground_prob)
             multi_candid_token  = torch.cat((input_ids, batch_tokens), dim=1)
-            # print(f'check when input gets wrong: after cat next target token {tokenizer.batch_decode(multi_candid_token)}\n-------------------------------------')
             
         end = time.time()
         # stats['token/second'] = (input_ids.size(-1) - non_change_input_len)/(end - start)
-        stats['draft_generation_time'] = draft_model_end - draft_model_start
-        return input_ids, stats
+        return input_ids, self.stats
 
-    def acceptance_check(self,
-        ground_probs: torch.FloatTensor,
-        cand_probs: Tuple[torch.FloatTensor],
-        cand_tokens: torch.LongTensor,
-    ) -> Optional[int]:
-        cand_probs = cand_probs.to(ground_probs.device)
-        for check_idx, cand_token in enumerate(cand_tokens):
-            accept_threshold = ground_probs[cand_token] / cand_probs[cand_token]
-            if torch.rand(1, device=accept_threshold.device) <= accept_threshold:
-                return check_idx
-            else:
-                ground_probs -= cand_probs
-                ground_probs = torch.nn.functional.relu(ground_probs, inplace=True)
-                ground_probs /= ground_probs.sum()
-                cand_probs[cand_token] = 0
-                cand_probs = cand_probs / cand_probs.sum()
-        return None
 
+    def continue_decision_check(self,entropy,prob):
+        """
+        1. this will return a bool on whether need further generation 
+        the model taking probs and entropy, so this function 
+        dont calculate the entropy or copy the logit to save time
+        input(entropy, prob)
+        """
+        cat_input = torch.cat((entropy.view(-1,1),prob.view(-1,1)),dim = -1) # 🤔 the dimension matters here 
+        with torch.no_grad():
+            output = self.decision_model(cat_input)
+        result = torch.any(output > self.decision_threshold).item()
+        if result:
+            return True
+        return False
+
+        
     def generate_draft(
         self,
         input_ids: torch.LongTensor,
@@ -198,6 +248,7 @@ class NewTreeStrategy:
         right here I need to call the target model to generate dist for first 
         multicandidate generation 
         """
+        step_tree_attn_self_mask = None
         
 
         # the input ids in generate draft always have past key values
@@ -208,15 +259,23 @@ class NewTreeStrategy:
         # TODO: the k here should be dynamically picked 
         step_tree_attn_mask = None
         position_ids = None
-        draft_depth = 0
+        self.continue_depth = 0
         # -----------------------------------------------------------------------
         ## I think I need to be careful here because the kvcache here is considering th
         # draft model, not the target model 
         #TODO: the for loop should replace by the decision model 
         for s in range(self.max_draft_len):
+            
             step = s +1
-            step_k = 1
-            draft_depth +=1
+            step_k = 1 # since this is fork like then only 1 is needed 
+            if self.stop_generation: 
+                # at least one draft generation 
+                self.stop_generation = False
+                self.dynamic_target_mask = self.tree_attn_self_mask[:self.cumulative_prod_size[step],:self.cumulative_prod_size[step]].clone()
+                return input_ids,tuple(cand_probs)
+                
+
+            self.continue_depth +=1
             step_tree_attn_self_mask = self.tree_attn_self_mask[
                 self.cumulative_prod_size[step - 1] : self.cumulative_prod_size[
                     step],: self.cumulative_prod_size[step],] 
@@ -227,7 +286,7 @@ class NewTreeStrategy:
                     device=self.draft_model_device,)
             context_attn_mask = torch.ones(
                     (self.prod_size[step], init_input_length), dtype=torch.bool
-                ).to(self.tree_attn_self_mask)
+                ).to(self.draft_model_device)
             step_tree_attn_mask = torch.cat(
                     (context_attn_mask, step_tree_attn_self_mask), dim=1
                 )
@@ -235,7 +294,7 @@ class NewTreeStrategy:
                 # when the last generation is full accepted, and draft kv cache is not enough
                 last_non_kv_cached_id = torch.tensor([init_input_length-1], dtype=torch.long, device=self.draft_model_device)[None]
                 position_ids = torch.cat((last_non_kv_cached_id, position_ids), dim=1)
-                new_row = torch.ones(1, step_tree_attn_mask.size(1), dtype=torch.bool).to(self.tree_attn_self_mask)
+                new_row = torch.ones(1, step_tree_attn_mask.size(1), dtype=torch.bool).to(self.draft_model_device)
                 num_ones = (step_tree_attn_mask[0] == 1).sum() - 1
                 new_row[0, num_ones:] = 0
                 step_tree_attn_mask = torch.cat((new_row, step_tree_attn_mask), dim=0)
@@ -279,21 +338,35 @@ class NewTreeStrategy:
                     step_cand_probs, step_k, replacement=True
                 ).view(1, -1)
             cand_probs.append(step_cand_probs)
+            
+            entropy = torch.distributions.Categorical(probs=step_cand_probs).entropy()
+            max_probs = torch.max(step_cand_probs,dim=-1).values
             draft_generation_end = time.time()
             generate_draft_time = draft_generation_end- draft_generation_start
+            
+            decision_model_start = time.time()
+            if self.using_decision_model and self.continue_decision_check(entropy=entropy,prob=max_probs) == False:
+                self.stop_generation = True
+            decision_model_end = time.time()
+            generate_decision_model_time = decision_model_end - decision_model_start
 
+            self.stats['draft_generation_time'] += generate_draft_time
+            self.stats['decision_model_time'] += generate_decision_model_time
 
             pruned_input_ids = cand_tokens
 
             input_ids = torch.cat((input_ids, pruned_input_ids), dim=1)
-        return input_ids,tuple(cand_probs), draft_depth
+        self.dynamic_target_mask = self.tree_attn_self_mask.clone()
+
+        return input_ids,cand_probs
 
     def _forward_target_model(
         self,
         input_ids: torch.LongTensor,
     ):
         input_ids = input_ids.to(self.target_model_device)
-        tree_attn_len = self.tree_attn_self_mask.size(0)
+        # the tree attn len here need to be change to shape of maximum accepted attn shape + 1
+        tree_attn_len = self.dynamic_target_mask.size(0)
         init_input_length = input_ids.size(1) - tree_attn_len
         init_forward = False
 
@@ -315,7 +388,7 @@ class NewTreeStrategy:
             tree_attn_mask.masked_fill_(
                 mask_cond < (mask_cond + 1).view(tree_attn_mask.size(-1), 1), 1
             )
-            tree_attn_mask[-tree_attn_len:, -tree_attn_len:] = self.tree_attn_self_mask
+            tree_attn_mask[-tree_attn_len:, -tree_attn_len:] = self.dynamic_target_mask
             position_ids = tree_attn_mask.sum(dim=1) - 1
 
         else:
@@ -327,10 +400,11 @@ class NewTreeStrategy:
                 dtype=torch.bool,
                 device=self.target_model_device,
             )
-
-            tree_attn_mask[:, init_input_length:] = self.tree_attn_self_mask
-            tree_attn_mask[0, init_input_length:] = 0
-            
+            # print(f"shape of tree attn mask is {tree_attn_mask.int()}")
+            #⭐ I need change the self.tree attn self mask here to the new mask 
+            tree_attn_mask[:, init_input_length:] = self.dynamic_target_mask
+            # print(f"shape of tree attn mask after dynamid target mask  {tree_attn_mask.int()}")
+            # tree_attn_mask[0, init_input_length:] = 0 # 🤔 this row may yielding incorrect position ids
             position_ids = tree_attn_mask.sum(dim=1) - 1
         outputs: BaseModelOutputWithPast = self.target_model.model(
             input_ids=pruned_input_ids,
@@ -349,6 +423,7 @@ class NewTreeStrategy:
             hidden_states[:, -tree_attn_len - 1 :]
         )  # 1 x seq_len x hidden_din
         return logits
+    
     def update_kv_cache(self,target_kv,draft_kv):
         
         for i in range(len(self.target_past_key_values)):
@@ -377,16 +452,12 @@ class NewTreeStrategy:
     ):
         
         input_ids = input_ids.to(self.target_model_device)
-      
-        
         logits = self._forward_target_model(input_ids)
         logits = logits[0]
-     
-
         # think about how to dynamic decide the logits needed 
         # first reshape the input ids into 2d matrix 
         # logtis need first 20, while token need last 20 
-        init_input_length = input_ids.size(1) -self.tree_attn_self_mask.size(0)
+        init_input_length = input_ids.size(1) -self.dynamic_target_mask.size(0)
         keep_indices = list(range(init_input_length))
         draft_keep_indices = keep_indices
         # dim0 is depth, dim1 is number of candidate
@@ -422,30 +493,98 @@ class NewTreeStrategy:
             # plus one here because need consider the target made tokens 
             for depth in range(longest_length+1):
                 keep_indices.append(depth * (self.max_config[0]) + longest_candidate_index+init_input_length) # minus one here because the index start from 0
-        
-        
         keep_indices = torch.tensor(
             keep_indices, dtype=torch.long, device=self.target_model_device
         )
         # print(f"check if keep_indices have redundant {keep_indices}")
         input_ids = input_ids.index_select(dim=1, index=keep_indices)
-        if longest_length == self.max_draft_len:
+        if longest_length == self.continue_depth:
             draft_keep_indices = keep_indices[: len(keep_indices)-1]
         else:
             draft_keep_indices = keep_indices
         self.update_kv_cache(target_kv=keep_indices,draft_kv=draft_keep_indices)
         
         return next_multi_tokens_logits, longest_length, input_ids
+    
 
+    def speculative_sampling(self,
+                             input_ids,
+                             candidate_probs):
+        """
+        1. first prepare the candiate probs as a mask 
+        2. create a same shape mask from target model's logits 
+        then do the something in greedy verify 
+        """
+        # print(f"shape of candidate_probs {len(candidate_probs)}")
+        dim = len(candidate_probs)
+        candidate_probs = torch.stack(candidate_probs,dim=0)
+        #device=self.target_model_device)
+        # print(f"what is the shape of candidate probs {candidate_probs.shape}, and device {candidate_probs.device} ")
+        input_ids = input_ids.to(self.target_model_device)
+        logits = self._forward_target_model(input_ids)
+        logits = logits[0]
+        ground_probs = torch.softmax(logits,dim=-1)
+        # print(f"shape of logits is {logits.shape}")
+        # think about how to dynamic decide the logits needed 
+        # first reshape the input ids into 2d matrix 
+        # logtis need first 20, while token need last 20 
+        init_input_length = input_ids.size(1) -self.dynamic_target_mask.size(0)
+        keep_indices = list(range(init_input_length))
+        draft_keep_indices = keep_indices
+        # dim0 is depth, dim1 is number of candidate
+        reshaped_logits = ground_probs.view(-1,self.max_config[0],logits.size(-1))
+        # no need the last layer logits for verification 
+        ground_probs_to_verify = ground_probs[:-self.max_config[0],:].view(-1,self.max_config[0],logits.size(-1))
+        token_to_verify = input_ids[:,init_input_length+self.max_config[0]:].view(-1,self.max_config[0])
+    
+        draft_probs_mask = candidate_probs[torch.arange(dim)[:,None,None],
+                                           torch.arange(self.max_config[0])[None,:,None],
+                                           token_to_verify[:,:,None]].squeeze(-1)
+        ground_probs_mask = ground_probs_to_verify[torch.arange(dim)[:,None,None],
+                                           torch.arange(self.max_config[0])[None,:,None],
+                                           token_to_verify[:,:,None]].squeeze(-1)
+    
+        ground_over_cand = ground_probs_mask/draft_probs_mask
+        accept_prob = torch.rand(dim,self.max_config[0],device=self.target_model_device)
 
+        # print(f"what is the shape of accpet_prob {accept_prob}")
+        # print(f"what is ground_over_cand {ground_over_cand}")
+        posterior_mask = (ground_over_cand>=accept_prob).int().transpose(0,1)
+        candidate_accept_length = (torch.cumprod(posterior_mask,dim=-1)).sum(dim=-1)
+        longest_length  = candidate_accept_length.max()
+        # print(f"check longest_length {longest_length} ")
+        # print(f'what is wrong with longest_length {longest_length}, and self.max_config {self.max_config} and self.max_draf_length {self.max_draft_len}')
+        if longest_length == 0:
+            # all rejected 
+            next_multi_tokens_logits = logits[0]
+            # this logits should be the last multi-token's target logits 
+            keep_indices.append(init_input_length)# the logits immediately after input, 
+        else: 
+            
+            longest_candidate_index = torch.argmax(candidate_accept_length)
+            # print(f"check longest_candidate_index {longest_candidate_index} ")
+            if longest_length == self.continue_depth:
+                next_multi_tokens_logits = reshaped_logits[longest_length,longest_candidate_index]
+            else:
+                # normalized the distribution to restore the target distribution 
+                # ⭐ the candidate prob need -1 because the depth of candidate prob is always one less than logits, due to target first 
+                diff = reshaped_logits[longest_length,longest_candidate_index] - candidate_probs[longest_length-1,longest_candidate_index] 
+                diff_max = torch.where(diff>0,diff,torch.zeros_like(diff))
+                diff_max_sum = torch.sum(diff_max,dim=-1,keepdim=True)
+                next_multi_tokens_logits = diff_max/diff_max_sum
+            
+            # plus one here because need consider the target made tokens 
+            for depth in range(longest_length+1):
+                keep_indices.append(depth * (self.max_config[0]) + longest_candidate_index+init_input_length) # minus one here because the index start from 0
+        keep_indices = torch.tensor(
+            keep_indices, dtype=torch.long, device=self.target_model_device
+        )
+        # print(f"check if keep_indices have redundant {keep_indices}")
+        input_ids = input_ids.index_select(dim=1, index=keep_indices)
+        if longest_length == self.continue_depth:
+            draft_keep_indices = keep_indices[: len(keep_indices)-1]
+        else:
+            draft_keep_indices = keep_indices
+        self.update_kv_cache(target_kv=keep_indices,draft_kv=draft_keep_indices)
         
-
-
-
-
-
-
-
-
-
-
+        return next_multi_tokens_logits, longest_length, input_ids

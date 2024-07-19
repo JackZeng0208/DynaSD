@@ -37,8 +37,9 @@ def test_model(test_loader, model, weight_path='/home/iasl-transformers/UCI-IASL
     with torch.no_grad():
         for inputs, labels in tqdm(test_loader):
             inputs, labels = inputs.cuda(), labels.cuda()
+            print(f'inputs: {input}, labels: {labels}')
             outputs = model(inputs).squeeze()
-            # print(outputs)
+            print("output is ",outputs)
             predicted = (outputs > 0.5).float()
             correct += (predicted == labels).sum().item()
 
