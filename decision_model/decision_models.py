@@ -3,10 +3,19 @@ import torch.nn as nn
 import math
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
-
-
-
-
+class DecisionModelVTopk(nn.Module):
+    def __init__(self):
+        super(DecisionModelVTopk, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(11, 44),
+            nn.ReLU(),
+            nn.Linear(44, 1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        return self.layers(x)
+        
 class DecisionModelV1(nn.Module):
     def __init__(self):
         super(DecisionModelV1, self).__init__()

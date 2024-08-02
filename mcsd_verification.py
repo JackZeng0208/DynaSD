@@ -112,6 +112,9 @@ run_time = end_time - start_time
 latency = run_time / (acceptance_count + invocation_count)
 acceptance_rate = acceptance_count / draft_token_count
 block_efficiency = 1 + acceptance_count / invocation_count
+# print(f"latency {latency}")
+# print(f"acceptance rate is {acceptance_rate}")
+# print(f"total run time is {run_time}")
 for i,path in enumerate(generator.stats):
     print(f"path {i} the average longest accepted length is {sum(path)/len(path)}")
 # plt.figure(figsize=(10, 6))
@@ -128,9 +131,9 @@ for i,path in enumerate(generator.stats):
 # # Show the plot
 # plt.show()
 
-# print("\nResults for MCSD:")
-# print(f"Run Time: {run_time:.2f}s")
-# print(f"Latency: {latency*1000:.2f}ms")
-# print(f"Acceptance Rate: {acceptance_rate:.2f}")
-# print(f"Tokens/s: {total_tokens / run_time:.2f}")
-# print()
+print("\nResults for MCSD:")
+print(f"Run Time: {run_time:.2f}s")
+print(f"Latency: {latency*1000:.2f}ms")
+print(f"Acceptance Rate: {acceptance_rate:.2f}")
+print(f"Tokens/s: {total_tokens / run_time:.2f}")
+print()

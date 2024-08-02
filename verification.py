@@ -12,12 +12,18 @@ import numpy as np
 DRAFT_MODEL_NAME = 'JackFram/llama-68m'
 # DRAFT_MODEL_NAME = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
 TARGET_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
-DECISION_MODEL_NAME = "v1_soft"
-DEBUG = False
+# DRAFT_MODEL_NAME = 'lmsys/vicuna-7b-v1.5'
 
-if DECISION_MODEL_NAME == "v1_soft":
-    DecisionModel = DecisionModelV1()
-    DECISION_MODEL_PATH = "UCI-IASL-Transformer/decision_model/weights/decision_model_v1_soft.pt"
+DecisionModel = DecisionModelV1()
+DEBUG = False
+if DRAFT_MODEL_NAME == 'JackFram/llama-68m' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
+    DECISION_MODEL_NAME = "v1_soft_68m_llama2"
+    DECISION_MODEL_PATH = "/home/iasl-transformers/DynaSD/decision_model/weights/v1_soft_68m_llama2.pt"
+
+if DRAFT_MODEL_NAME == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
+    DECISION_MODEL_NAME = "v1_soft_tiny_llama2"
+    DECISION_MODEL_PATH = "DynaSD/decision_model/weights/v1_soft_tiny_llama2.pt"
+
 
 def plot_results(results,decision_model=DECISION_MODEL_NAME):
     thresholds = sorted(set(r['threshold'] for r in results))
@@ -79,13 +85,15 @@ draft_model_temp = 0
 target_model_temp = 0
 
 width = 6
+DecisionModel = DecisionModelVTopk()
+DECISION_MODEL_PATH = '/home/iasl-transformers/DynaSD/decision_model/vbtopk_llama68m_llama2_7b.pt'
 # Our accelerated strategy
 strategy = NewTreeStrategy(
     draft_model=draft_model,
     target_model=target_model,
     eos_token_id=tokenizer.eos_token_id,
     max_new_tokens=max_new_tokens,
-    greedy=False,
+    greedy=True,
     using_decision_model=True,
     decision_model=DecisionModel,
     decision_model_path=DECISION_MODEL_PATH,
@@ -98,7 +106,7 @@ strategy = NewTreeStrategy(
 
 def read_sentences_from_file():
     sentences = []
-    with open('UCI-IASL-Transformer/sentences.txt', 'r', encoding='utf-8') as file:
+    with open('/home/iasl-transformers/DynaSD/sentences.txt', 'r', encoding='utf-8') as file:
         for line in file:
             # Strip whitespace and skip empty lines
             sentence = line.strip()
@@ -142,12 +150,12 @@ results = []
 
 # Inside your nested loops, after calculating total_stats
 
-# prompts = read_sentences_from_file()
+prompts = read_sentences_from_file()
 threshold_to_experiment = [0.4,0.5,0.6,0.7,0.8]
 # threshold_to_experiment = [0]
 length_to_experiment = [3,4,5,6,7,8,9,10,11,12,13]
-threshold_to_experiment = [0.4]
-length_to_experiment = [7]
+threshold_to_experiment = [0.5]
+length_to_experiment = [10]
 best_threshold = threshold_to_experiment[0]
 best_length = length_to_experiment[0]
 largest_token_per_second = float('-inf')
@@ -199,7 +207,7 @@ with torch.no_grad():
                 'token_per_second': total_stats['token/second']
             })
             print(f"acceptance rate is {total_stats['acceptance_rate']}")
-            print(f"decision Model is {strategy.decision_model_name}")
+            # print(f"decision Model is {strategy.decision_model_name}")
             print(f"current threshold is {threshold}, current length is {length}")
             print(f"current best threshold: {best_threshold}, best length: {best_length}")
             print(f"total time spend is {end - start}")
@@ -213,10 +221,10 @@ with torch.no_grad():
                 best_threshold = threshold
                 best_length = length 
                 largest_token_per_second = total_stats["token/second"]
-    print(f"with decision model {strategy.decision_model_name}\ntoken/sec: {largest_token_per_second }\nbest threshold: {best_threshold}, best length is {best_length}")
-    plot_results(results,decision_model=strategy.decision_model_name)
-for i,path in enumerate(strategy.max_token_path):
-    print(f"path {i} the average longest accpeted length is {sum(path)/len(path)}")
+    print(f"current decision model\ntoken/sec: {largest_token_per_second }\nbest threshold: {best_threshold}, best length is {best_length}")
+    # plot_results(results,decision_model=strategy.decision_model_name)
+# for i,path in enumerate(strategy.max_token_path):
+#     print(f"path {i} the average longest accpeted length is {sum(path)/len(path)}")
 # plt.figure(figsize=(10, 6))
 # plt.hist(strategy.max_token_path, bins=width, edgecolor='black')
 

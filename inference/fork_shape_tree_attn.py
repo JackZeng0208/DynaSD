@@ -63,7 +63,7 @@ class NewTreeStrategy:
         generate_training_data = False, # generating training data to train decision model 
         draft_model_temp: float = 0,
         target_model_temp: float = 0,
-        decision_model_path: str = "UCI-IASL-Transformer/decision_model/weights/decision_model_v1_soft.pt",
+        decision_model_path: str = "",
     ) -> None:
         """
         so the max_config here could be 5 in width and 10 in depth 
@@ -72,16 +72,14 @@ class NewTreeStrategy:
         self.target_model_device = (
             target_model.model.get_input_embeddings().weight.device
         )
-        ## for decision model 
+        # for decision model 
         self.using_decision_model =  using_decision_model if not generate_training_data else False
-        self.decision_model = decision_model
+        if self.using_decision_model:
+            self.decision_model = decision_model
+            self.decision_model.load_state_dict(torch.load(decision_model_path))
+            self.decision_model.cuda()
+            self.decision_model.eval()
 
-
-        # TODO: load when new decision model trained
-        self.decision_model_name = (decision_model_path[-15:])
-        self.decision_model.load_state_dict(torch.load(decision_model_path))
-        self.decision_model.cuda()
-        self.decision_model.eval()
         self.stop_generation = False
         self.continue_depth = 0 
         self.decision_threshold = decision_threshold
@@ -117,6 +115,7 @@ class NewTreeStrategy:
         self.draft_hidden_states = None # input of decision model 
         self.verification_result = None 
         self.draft_entropy = None
+        self.draft_topk_prob = None
         self.generate_training_data = generate_training_data
 
         # stats collection
@@ -150,6 +149,7 @@ class NewTreeStrategy:
                 self.verification_result = None
             self.draft_hidden_states = None # used for generate decision model training data and decision model inference 
             self.draft_entropy = None
+            self.draft_topk_prob = None
 
         
             input_ids = input_ids.to(self.draft_model_device)
@@ -217,14 +217,16 @@ class NewTreeStrategy:
                 
             if not self.generate_training_data:
                 return input_ids, self.stats
-            return input_ids, self.draft_entropy, self.verification_result
+            self.draft_entropy = self.draft_entropy.unsqueeze(1)
+            return input_ids, torch.cat((self.draft_entropy,self.draft_topk_prob),dim=-1), self.verification_result
 
 
-    def continue_decision_check(self,hidden_states):
+    def continue_decision_check(self,decision_model_input):
         # cat_input = torch.cat((entropy.view(-1,1),prob.view(-1,1)),dim = -1) # 🤔 the dimension matters here 
 
         with torch.no_grad():
-            output = self.decision_model(hidden_states)
+            # output = self.decision_model(hidden_states)
+            output = self.decision_model(decision_model_input)
         result = torch.any(output > self.decision_threshold).item()
         if result:
             return True
@@ -318,9 +320,6 @@ class NewTreeStrategy:
             else:
                 self.draft_hidden_states = torch.cat((self.draft_hidden_states,hidden_states),dim=0)
 
-
-
-            
             logits = self.draft_model.lm_head(hidden_states)  # seq_len x hidden_dim
 
             past_key_values = list(outputs.past_key_values)
@@ -341,9 +340,15 @@ class NewTreeStrategy:
                 ).view(1, -1)
             cand_probs.append(step_cand_probs)
             
-            entropy = torch.distributions.Categorical(probs=torch.softmax(logits,dim=-1)).entropy()
-            max_probs = torch.max(step_cand_probs,dim=-1).values
             draft_generation_end = time.time()
+            entropy = torch.distributions.Categorical(probs=torch.softmax(logits,dim=-1)).entropy()
+
+            draft_next_token_dist = torch.softmax(logits,dim=-1)
+            current_topk_prob,_ = draft_next_token_dist.topk(k = 10,dim=-1) 
+            if self.draft_topk_prob == None:
+                self.draft_topk_prob = current_topk_prob
+            else:
+                self.draft_topk_prob = torch.cat((self.draft_topk_prob,current_topk_prob),dim=0)
 
             # new decision threshold: 
             if self.draft_entropy == None:
@@ -352,9 +357,13 @@ class NewTreeStrategy:
                 self.draft_entropy = torch.cat((self.draft_entropy,entropy),dim=0)
 
             generate_draft_time = draft_generation_end- draft_generation_start
-            
+            entropy = entropy.unsqueeze(1)
+            decision_model_input = torch.cat((entropy,current_topk_prob),dim = -1) 
+
+            # decision_model_input = hidden_states
+
             decision_model_start = time.time()
-            if self.using_decision_model and self.continue_decision_check(hidden_states) == False:
+            if self.using_decision_model and self.continue_decision_check(decision_model_input=decision_model_input) == False:
                 self.stop_generation = True
             decision_model_end = time.time()
             generate_decision_model_time = decision_model_end - decision_model_start
