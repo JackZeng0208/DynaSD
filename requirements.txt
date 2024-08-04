@@ -3,3 +3,5 @@ datasets
 bitsandbytes
 accelerate
 torch
+scipy
+matplotlib
