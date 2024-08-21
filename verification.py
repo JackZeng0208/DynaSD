@@ -5,27 +5,50 @@ from transformers import AutoTokenizer
 from tqdm import tqdm
 from inference.fork_shape_tree_attn import *
 from inference.strategies import *
-from decision_model.decision_models import *
+from DynaSD.decision_models import *
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 
-DRAFT_MODEL_NAME = 'JackFram/llama-68m'
+SOFT_LABEL = False
 # DRAFT_MODEL_NAME = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+DRAFT_MODEL_NAME = 'JackFram/llama-68m'
 TARGET_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
-# DRAFT_MODEL_NAME = 'lmsys/vicuna-7b-v1.5'
+# TARGET_MODEL_NAME = "lmsys/vicuna-7b-v1.5"
 
-DecisionModel = DecisionModelV1()
-DEBUG = False
+if DRAFT_MODEL_NAME == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and TARGET_MODEL_NAME == "lmsys/vicuna-7b-v1.5":
+    DECISION_MODEL_NAME = "tinyllama_vicuna_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1_Tinyllama().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+
+if DRAFT_MODEL_NAME == 'JackFram/llama-68m' and TARGET_MODEL_NAME == "lmsys/vicuna-7b-v1.5":
+    DECISION_MODEL_NAME = "llama_68m_vicuna_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+
 if DRAFT_MODEL_NAME == 'JackFram/llama-68m' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
-    DECISION_MODEL_NAME = "v1_soft_68m_llama2"
-    DECISION_MODEL_PATH = "/home/iasl-transformers/DynaSD/decision_model/weights/v1_soft_68m_llama2.pt"
+    DECISION_MODEL_NAME = "llama_68m_llama2_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
 
 if DRAFT_MODEL_NAME == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
-    DECISION_MODEL_NAME = "v1_soft_tiny_llama2"
-    DECISION_MODEL_PATH = "DynaSD/decision_model/weights/v1_soft_tiny_llama2.pt"
-
-
-def plot_results(results,decision_model=DECISION_MODEL_NAME):
+    DECISION_MODEL_NAME = "tinyllama_llama2_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1_Tinyllama().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+if SOFT_LABEL == True:
+    file_name = f"soft_{DECISION_MODEL_NAME}"
+else:
+    file_name = f"hard_{DECISION_MODEL_NAME}"
+    
+def plot_results(results,decision_model=file_name):
     thresholds = sorted(set(r['threshold'] for r in results))
     lengths = sorted(set(r['length'] for r in results))
     
@@ -82,78 +105,50 @@ target_model.eval()
 # Parameters
 max_new_tokens = 200
 draft_model_temp = 0
-target_model_temp = 0
+target_model_temp =0
 
-width = 6
-DecisionModel = DecisionModelVTopk()
-DECISION_MODEL_PATH = '/home/iasl-transformers/DynaSD/decision_model/vbtopk_llama68m_llama2_7b.pt'
+width = 10
+# print(f"detection model is {DECISION_MODEL_NAME}")
+DECISION_MODEL_PATH = f'/home/iasl-transformers/DynaSD/decision_model/{file_name}.pt'
+DECISION_MODEL_PATH= '/home/iasl-transformers/DynaSD/decision_model/high_quality_False_llama_68m_llama2_7b.pt'
+
 # Our accelerated strategy
 strategy = NewTreeStrategy(
     draft_model=draft_model,
     target_model=target_model,
     eos_token_id=tokenizer.eos_token_id,
     max_new_tokens=max_new_tokens,
-    greedy=True,
+    greedy=False,
     using_decision_model=True,
-    decision_model=DecisionModel,
+    decision_model=decision_model,
     decision_model_path=DECISION_MODEL_PATH,
-    decision_threshold= 0.4,
-    config_depth= 7,
+    decision_threshold= 0.5,
+    config_depth= 5,
     config_width= width,
     draft_model_temp=draft_model_temp,
-    target_model_temp=target_model_temp
+    target_model_temp=target_model_temp,
+    soft_label=SOFT_LABEL
 )
 
 def read_sentences_from_file():
     sentences = []
-    with open('/home/iasl-transformers/DynaSD/sentences.txt', 'r', encoding='utf-8') as file:
-        for line in file:
+    with open('/home/iasl-transformers/DynaSD/decision_model/training_datasets/combined_training_questions.json', 'r') as file:
+        data = json.load(file)
+        for line in data:
             # Strip whitespace and skip empty lines
             sentence = line.strip()
             if sentence:
                 sentences.append(sentence)
     return sentences
 
-prompts = [
-    "The old oak tree stood tall, its branches reaching for the sky.",
-    "She carefully placed the last piece of the puzzle, completing the image.",
-    "The aroma of freshly baked bread filled the small bakery.",
-    "The scientist peered into the microscope, searching for answers.",
-    "Waves crashed against the rocky shore, sending spray into the air.",
-    "The ancient manuscript revealed secrets long forgotten by time.",
-    "Children laughed and played in the park on a sunny afternoon.",
-    "The spaceship's engines roared to life as it prepared for launch.",
-    "A lone wolf howled at the moon from atop a snow-covered hill.",
-    "The artist dipped her brush in paint, ready to create a masterpiece.",
-    "The detective examined the crime scene, looking for clues.",
-    "Fireflies danced in the twilight, their lights twinkling like stars.",
-    "The chef seasoned the dish with a pinch of exotic spices.",
-    "A gentle breeze rustled the leaves of the cherry blossom trees.",
-    "The marathon runner crossed the finish line, exhausted but triumphant.",
-    "The magician waved his wand, making the rabbit disappear from the hat.",
-    "Students hurried across the campus, late for their morning classes.",
-    "The violinist closed her eyes, losing herself in the music.",
-    "A shooting star streaked across the night sky, granting silent wishes.",
-    "The archaeologist carefully brushed dirt from the ancient artifact.",
-    "Raindrops pattered against the window pane, creating a soothing rhythm.",
-    "The cat stretched lazily in a patch of warm sunlight on the carpet.",
-    "The hiker reached the mountain peak, surveying the breathtaking view.",
-    "A flock of geese flew overhead in a perfect V formation.",
-    "The librarian stamped the due date on the last book of the day.",
-    "The blacksmith hammered the red-hot metal, shaping it with skill.",
-    "Colorful hot air balloons dotted the sky during the festival.",
-    "The scuba diver explored the vibrant coral reef teeming with life.",
-    "A rainbow appeared after the storm, arching across the sky.",
-    "The clockmaker carefully adjusted the gears of the antique timepiece."
-]
 results = []
 
 # Inside your nested loops, after calculating total_stats
 
-prompts = read_sentences_from_file()
-threshold_to_experiment = [0.4,0.5,0.6,0.7,0.8]
+prompts = read_sentences_from_file()[-200:]
+threshold_to_experiment = [0.4,0.5,0.6]
 # threshold_to_experiment = [0]
-length_to_experiment = [3,4,5,6,7,8,9,10,11,12,13]
+# length_to_experiment = [2,3,4,5,6,7,8,9,10]
 threshold_to_experiment = [0.5]
 length_to_experiment = [10]
 best_threshold = threshold_to_experiment[0]
@@ -168,10 +163,6 @@ with torch.no_grad():
                         "decision_model_time": 0.0, "decision_acceptance_count": 0}
 
             strategy.decision_threshold = threshold
-            strategy.stats = {'token/second': 0.0,'ground_acceptance_count': 0,
-                        "draft_generation_time":0.0, "verification_time":0.0, 
-                        "total_generation_round":0, "decision_model_time":0.0, 
-                        "decision_acceptance_count":0}
             strategy.max_config = strategy.generate_fork_config(width = width,depth=length)
             strategy.tree_attn_self_mask = get_tree_attn_self_mask(strategy.max_config).to(device=strategy.draft_model_device) # type: ignore
             strategy.max_draft_len = len(strategy.max_config)-1
@@ -222,7 +213,8 @@ with torch.no_grad():
                 best_length = length 
                 largest_token_per_second = total_stats["token/second"]
     print(f"current decision model\ntoken/sec: {largest_token_per_second }\nbest threshold: {best_threshold}, best length is {best_length}")
-    # plot_results(results,decision_model=strategy.decision_model_name)
+    # plot_results(results)
+
 # for i,path in enumerate(strategy.max_token_path):
 #     print(f"path {i} the average longest accpeted length is {sum(path)/len(path)}")
 # plt.figure(figsize=(10, 6))

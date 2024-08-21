@@ -7,13 +7,44 @@ import json
 from model.llama_tree_attn import LlamaForCausalLM
 from inference.fork_shape_tree_attn import NewTreeStrategy
 import matplotlib.pyplot as plt
-from decision_model.decision_models import *
+from DynaSD.decision_models import *
 from torch.utils.data import Dataset,DataLoader
 import random
 import seaborn as sns
 import os
-import numpy as np 
+SOFT_LABEL = True
+# DRAFT_MODEL_NAME = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
+DRAFT_MODEL_NAME = 'JackFram/llama-68m'
+TARGET_MODEL_NAME = "meta-llama/Llama-2-7b-chat-hf"
+# TARGET_MODEL_NAME = "lmsys/vicuna-7b-v1.5"
 
+if DRAFT_MODEL_NAME == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and TARGET_MODEL_NAME == "lmsys/vicuna-7b-v1.5":
+    DECISION_MODEL_NAME = "tinyllama_vicuna_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1_Tinyllama().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+
+if DRAFT_MODEL_NAME == 'JackFram/llama-68m' and TARGET_MODEL_NAME == "lmsys/vicuna-7b-v1.5":
+    DECISION_MODEL_NAME = "llama_68m_vicuna_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+
+if DRAFT_MODEL_NAME == 'JackFram/llama-68m' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
+    DECISION_MODEL_NAME = "llama_68m_llama2_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
+
+if DRAFT_MODEL_NAME == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and TARGET_MODEL_NAME == "meta-llama/Llama-2-7b-chat-hf":
+    DECISION_MODEL_NAME = "tinyllama_llama2_7b"
+    if SOFT_LABEL == True:
+        decision_model = DecisionModelV1_Tinyllama().cuda()
+    else:
+        decision_model = DecisionModelVTopk().cuda()
 
 class BalancedDataset(Dataset):
     def __init__(self, data, labels):
@@ -26,18 +57,23 @@ class BalancedDataset(Dataset):
         
         # Sample negative examples to match positive examples
         print(f" length of positive indices {len(pos_indices)}, and len of negative indices {len(neg_indices)}")
-        # num_pos = len(pos_indices)
-        # sampled_neg_indices = random.sample(neg_indices.tolist(), num_pos)
+        if len(pos_indices)>len(neg_indices):
+            # using neg as bottom line 
+            num_neg = len(neg_indices)
+            sample_pos_indices = random.sample(pos_indices.tolist(),num_neg)
+            self.balanced_indices = torch.cat([neg_indices, torch.tensor(sample_pos_indices)])
+        else:
+            # using pos as bottom line 
+
+            num_pos = len(pos_indices)
+            sampled_neg_indices = random.sample(neg_indices.tolist(), num_pos)
+            self.balanced_indices = torch.cat([pos_indices, torch.tensor(sampled_neg_indices)])
         
-        num_neg = len(neg_indices)
-        sample_pos_indices = random.sample(pos_indices.tolist(),num_neg)
-        self.balanced_indices = torch.cat([neg_indices, torch.tensor(sample_pos_indices)])
+        self.balanced_indices = self.balanced_indices[torch.randperm(len(self.balanced_indices))]
         
         # Combine indices
-        # self.balanced_indices = torch.cat([pos_indices, torch.tensor(sampled_neg_indices)])
         
         # Shuffle the indices
-        self.balanced_indices = self.balanced_indices[torch.randperm(len(self.balanced_indices))]
 
     def __len__(self):
         return len(self.balanced_indices)
@@ -74,7 +110,6 @@ class SimpleDataset(Dataset):
         # real_idx = self.balanced_indices[idx]
         return self.data[idx], self.labels[idx]
 
-
 def load_dataset(filename):
     dataset = []
     with open(filename, 'r') as f:
@@ -83,18 +118,14 @@ def load_dataset(filename):
             dataset.append(item)
     return dataset
 
-
-draft_model_name = 'TinyLlama/TinyLlama-1.1B-Chat-v1.0'
-target_model_name = "meta-llama/Llama-2-7b-chat-hf"
-
 draft_model = LlamaForCausalLM.from_pretrained(
-    draft_model_name,
+    DRAFT_MODEL_NAME,
     torch_dtype=torch.float32,
     device_map=0,
 )
 
 target_model = LlamaForCausalLM.from_pretrained(
-    target_model_name,
+    TARGET_MODEL_NAME,
     torch_dtype=torch.bfloat16,
     device_map= 0,
 )
@@ -106,14 +137,13 @@ class TrainDecisionModel:
         strategy,
         training_data_file_name = '/home/iasl-transformers/DynaSD/decision_model/training_datasets/combined_training_questions.json',
         training_epoch = 10,
-        learning_rate = 0.01,
+        learning_rate = 0.001,
         batch_size = 20, # the batch size should be carefully chosen for easy code implementation since no torch.dataset is using
-        train_without_save_data = True,
         decision_model_save_path = '/home/iasl-transformers/DynaSD/decision_model/',
                  ) -> None:
-        self.decision_model = DecisionModelVTopk().cuda()
-        self.loss_file = 'loss_v_topk.png'
-        self.weight_save_path = decision_model_save_path+'vbtopk_llama68m_llama2_7b.pt'
+        self.decision_model = decision_model
+        self.loss_file = 'high_quality_loss_v_topk.png'
+        self.weight_save_path = decision_model_save_path+f'high_quality_{SOFT_LABEL}_{DECISION_MODEL_NAME}.pt'
 
         
         self.strategy = strategy
@@ -125,30 +155,21 @@ class TrainDecisionModel:
         self.epoch = training_epoch
 
         # datasets
-        self.dataset = load_dataset(training_data_file_name)
-        self.dataset = random.sample(self.dataset, 10000)
+        self.dataset = load_dataset(training_data_file_name)[:10000]
+        # self.dataset = random.sample(self.dataset, 10000)
         print(self.dataset[0])
         self.train_val_split = int(len(self.dataset)*0.9) # 90% training, 10% val
-        self.new_dataset_base = '/home/iasl-transformers/DynaSD/decision_model/soft_label/'
-        self.hard_label_path_base = '/home/iasl-transformers/DynaSD/decision_model/topk_hard_label/'
-        self.soft_train_x_path = self.new_dataset_base + 'soft_train_x.pt'
-        self.soft_train_y_path = self.new_dataset_base + 'soft_train_y.pt'
-        self.soft_val_x_path = self.new_dataset_base + 'soft_val_x.pt'
-        self.soft_val_y_path = self.new_dataset_base + 'soft_val_y.pt'
+        self.new_dataset_base = '/home/iasl-transformers/DynaSD/decision_model/high_quality_soft/'
+        self.hard_label_path_base = '/home/iasl-transformers/DynaSD/decision_model/high_quality_hard_labels/'
+        self.soft_train_x_path = self.new_dataset_base + f'soft_train_x_{DECISION_MODEL_NAME}.pt'
+        self.soft_train_y_path = self.new_dataset_base + f'soft_train_y_{DECISION_MODEL_NAME}.pt'
+        self.soft_val_x_path = self.new_dataset_base + f'soft_val_x_{DECISION_MODEL_NAME}.pt'
+        self.soft_val_y_path = self.new_dataset_base + f'soft_val_y_{DECISION_MODEL_NAME}.pt'
 
-        self.hard_train_x_path = self.hard_label_path_base + 'hard_train_x.pt'
-        self.hard_train_y_path = self.hard_label_path_base + 'hard_train_y.pt'
-        self.hard_val_x_path =   self.hard_label_path_base + 'hard_val_x.pt'
-        self.hard_val_y_path =   self.hard_label_path_base + 'hard_val_y.pt'
-
-
-
-        # Training Strategy
-        self.generated_training_dataset_path = "/home/iasl-transformers/DynaSD/decision_model/training_data_tensor_x.pt"
-        self.generated_label_dataset_path = "/home/iasl-transformers/DynaSD/decision_model/training_data_tensor_y.pt"
-        self.train_without_save_data = train_without_save_data
-        self.validation_dataset_x_path = '/home/iasl-transformers/DynaSD/decision_model/validation_data_tensor_x.pt'
-        self.validation_dataset_y_path = '/home/iasl-transformers/DynaSD/decision_model/validation_data_tensor_y.pt'
+        self.hard_train_x_path = self.hard_label_path_base + f'hard_train_x_{DECISION_MODEL_NAME}.pt'
+        self.hard_train_y_path = self.hard_label_path_base + f'hard_train_y_{DECISION_MODEL_NAME}.pt'
+        self.hard_val_x_path =   self.hard_label_path_base + f'hard_val_x_{DECISION_MODEL_NAME}.pt'
+        self.hard_val_y_path =   self.hard_label_path_base + f'hard_val_y_{DECISION_MODEL_NAME}.pt'
 
         #training Stats
         self.training_avg_loss_epoch = []
@@ -178,11 +199,17 @@ class TrainDecisionModel:
 
     def append_to_tensor_dataset(self,new_tensors,is_label = False,is_val= False):
         # training option 2: save the generated training data, 
-        
-        if not is_val:
-            path = self.hard_train_y_path if is_label else self.hard_train_x_path 
+        if SOFT_LABEL == True:
+            if not is_val:
+                path = self.soft_train_y_path if is_label else self.soft_train_x_path 
+            else:
+                path = self.soft_val_y_path if is_label else self.soft_val_x_path
         else:
-            path = self.hard_val_y_path if is_label else self.hard_val_x_path 
+            if not is_val:
+                path = self.hard_train_y_path if is_label else self.hard_train_x_path 
+            else:
+                path = self.hard_val_y_path if is_label else self.hard_val_x_path 
+
         if os.path.exists(path) and os.path.getsize(path) > 0:
             try:
                 existing_dataset = torch.load(path)
@@ -200,7 +227,7 @@ class TrainDecisionModel:
 
         torch.save(existing_dataset, path)
     
-    def generate_data(self,accept_training_example = 50000):
+    def generate_data(self,accept_training_example = 1):
         #due to 1 and 0 are not evenly distributed, prioritize collect accept_training_example
         # amount of training example 
         num_1 = 0
@@ -208,23 +235,25 @@ class TrainDecisionModel:
         for i,s in enumerate(tqdm(self.dataset[:self.train_val_split])):
             input_ids = tokenizer(s, return_tensors='pt').input_ids.to('cuda')
             output, x, y= self.strategy.generation_loop(input_ids)
-            # print(f"shape of x should be 11 {x.shape}")
+            print(f"shape of x should be 11 {x.shape}")
+            print(f"what is y {y}")
             # print(f"current y has negtive  {(y < 0).any().item()}")
             num_1 += x.shape[0]-torch.sum(y)
             x = x.detach().cpu()
             y = y.detach().cpu()
             train_x.extend(x)
             train_y.extend(y)
-            if num_1 >= accept_training_example:
+            # if num_1 >= accept_training_example:
+            #     break
+            if i > accept_training_example:
                 break
             # self.append_to_tensor_dataset(train_x)
             # self.append_to_tensor_dataset(train_y,is_label=True)
         self.append_to_tensor_dataset(train_x)
         self.append_to_tensor_dataset(train_y,is_label=True)
         
-
         val_x,val_y = [],[]
-        for vs in tqdm(self.dataset[self.train_val_split:self.train_val_split +50]):
+        for vs in tqdm(self.dataset[self.train_val_split:self.train_val_split +5]):
             input_ids = tokenizer(vs, return_tensors='pt').input_ids.to('cuda')
             output, x, y= self.strategy.generation_loop(input_ids)
             x = x.detach().cpu()
@@ -235,10 +264,14 @@ class TrainDecisionModel:
         self.append_to_tensor_dataset(val_x,is_label=False,is_val=True)
         
     def only_eval(self):
-
         self.decision_model.load_state_dict(torch.load(self.weight_save_path))
-        val_dataset = SimpleDataset(self.hard_val_x_path,self.hard_val_y_path)
-        val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
+        if SOFT_LABEL == True:
+            val_dataset = SimpleDataset(self.soft_val_x_path,self.soft_val_y_path)
+            val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
+        else:
+            val_dataset = SimpleDataset(self.hard_val_x_path,self.hard_val_y_path)
+            val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
+        
         val_loss = 0
         val_round = 0
         pbar = tqdm(val_dataloader)
@@ -251,16 +284,17 @@ class TrainDecisionModel:
 
     
     def train_with_dataset(self):
-        # train_dataset = SimpleDataset(self.soft_train_x_path,self.soft_train_y_path)
-        # train_dataloader = DataLoader(train_dataset,batch_size=50,shuffle=True)
-        # val_dataset = SimpleDataset(self.soft_val_x_path,self.soft_val_y_path)
-        # val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
+        if SOFT_LABEL == True:
+            train_dataset = SimpleDataset(self.soft_train_x_path,self.soft_train_y_path)
+            train_dataloader = DataLoader(train_dataset,batch_size=50,shuffle=True)
+            val_dataset = SimpleDataset(self.soft_val_x_path,self.soft_val_y_path)
+            val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
+        else:
+            train_dataset = BalancedDataset(self.hard_train_x_path,self.hard_train_y_path)
+            train_dataloader = DataLoader(train_dataset,batch_size=50,shuffle=True)
+            val_dataset = BalancedDataset(self.hard_val_x_path,self.hard_val_y_path)
+            val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
 
-        train_dataset = BalancedDataset(self.hard_train_x_path,self.hard_train_y_path)
-        
-        train_dataloader = DataLoader(train_dataset,batch_size=50,shuffle=True)
-        val_dataset = BalancedDataset(self.hard_val_x_path,self.hard_val_y_path)
-        val_dataloader = DataLoader(val_dataset,batch_size=50,shuffle=True)
         for e in tqdm(range(self.epoch)):
             self.pos_y_pred_probs = []
             self.neg_y_pred_probs = []
@@ -397,19 +431,25 @@ class TrainDecisionModel:
 
 
 if __name__ == '__main__':
-    tokenizer = AutoTokenizer.from_pretrained(target_model_name)
+    if SOFT_LABEL == True:
+        greedy_flag = False
+    else:
+        greedy_flag = True
+    tokenizer = AutoTokenizer.from_pretrained(TARGET_MODEL_NAME)
     strategy = NewTreeStrategy(
         draft_model= draft_model,
         target_model= target_model,
         eos_token_id=tokenizer.eos_token_id,
         max_new_tokens= 200,
-        greedy = True,
+        # Set greedy = False if it is soft label decision model
+        greedy = greedy_flag,
         using_decision_model=False,
-        config_depth= 3,
+        config_depth= 1,
         config_width=10,
-        generate_training_data=True
+        generate_training_data=True,
+        soft_label = SOFT_LABEL
         )
     model_train = TrainDecisionModel(strategy=strategy)
-    # model_train.generate_data()
+    model_train.generate_data()
     model_train.train_with_dataset()
     model_train.only_eval()

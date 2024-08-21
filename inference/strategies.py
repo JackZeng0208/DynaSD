@@ -19,20 +19,21 @@ class DecoderOnlyDraftOutput(ModelOutput):
 
 @dataclass
 class DecoderOnlyVerificationOutput(ModelOutput):
-#    Base class for verific
+    """
+    Base class for verification outputs of decoder-only generation models using speculative decoding.
+    """
+
     sequences: torch.LongTensor = None
     target_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     draft_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     acceptance_count: Optional[int] = None
 
 
-def _MCNS(#ation outputs of decoder-only generation models using speculative decoding.
-
-
+def _MCNS(
     ground_probs: torch.FloatTensor,
     cand_probs: Tuple[torch.FloatTensor],
     cand_tokens: torch.LongTensor,
-)-> Optional[int]:
+) -> Optional[int]:
     ground_token = torch.multinomial(ground_probs, num_samples=1).item()
 
     for check_idx, cand_token in enumerate(cand_tokens):
@@ -102,10 +103,6 @@ class Strategy:
         self.target_model_temp = target_model_temp
         self.replacement = replacement
         self.speculative_sampling = speculative_sampling
-        
-        self.maximum_token_path = []
-        for _ in range(k_config[0]):
-            self.maximum_token_path.append([])
 
         self.acceptance_check: Callable[
             [torch.FloatTensor, Tuple[torch.FloatTensor], torch.LongTensor],
@@ -503,9 +500,7 @@ class TreeStrategy(Strategy):
                     cand_tokens = topk_index.view(1, -1)
                     cand_tokens = torch.repeat_interleave(cand_tokens, step_k, dim=1)
             else:
-                print(f"MCSD is using multinomial")
                 step_cand_probs = torch.softmax(logits / self.draft_model_temp, dim=-1)
-                # _,cand_tokens = step_cand_probs.topk(k = step_k,dim=-1).view(1,-1)
                 cand_tokens = torch.multinomial(
                     step_cand_probs, step_k, replacement=self.replacement
                 ).view(1, -1)
@@ -583,134 +578,6 @@ class TreeStrategy(Strategy):
             hidden_states[:, -tree_attn_len - 1 :]
         )  # 1 x seq_len x hidden_dim
         return logits, past_key_values
-    def mask_verify(
-        self,
-        input_ids: torch.LongTensor,
-        target_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]],
-        draft_model_past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]],
-        cand_probs: Optional[Tuple[torch.FloatTensor]],
-
-    ):
-        input_ids = input_ids.to(self.target_model_device)
-        logits, target_model_past_key_values = self._forward_target_model(
-            input_ids, target_model_past_key_values
-        )
-        logits = logits[0]  # seq_len x hidden_dim
-        tree_attn_len = self.tree_attn_self_mask.size(0)
-        unverified_tokens = input_ids[0, -tree_attn_len:]
-        init_input_length = input_ids.size(1) - tree_attn_len
-        keep_indices = list(range(init_input_length))
-
-
-        # if self.target_model_temp == 0:
-        #     _, topk_index = logits.topk(k=1, dim=-1)  # seq_len x 1
-        #     ground_probs = torch.zeros_like(logits)
-        #     ground_probs.scatter_(dim=1, index=topk_index, value=1)
-        # else:
-        ground_probs = torch.softmax(logits, dim=-1)
-        current_ground_prob = ground_probs[0]
-        # print(f"length of cand_probs is {len(cand_probs)}, first layer {cand_probs[0].shape}, second layer {cand_probs[1].shape}, third layer {cand_probs[2].shape}")
-        # ground_probs = ground_probs[1:]
-        first_verification_prob = current_ground_prob.repeat(self.k_config[0]-1,1)
-        verification_probs = torch.cat([first_verification_prob,ground_probs],dim = 0)
-
-        first_draft_probs = cand_probs[0].repeat(self.k_config[0],1).unsqueeze(0)
-        draft_probs = torch.stack(cand_probs[1:],dim=0)
-        # print(f"shape of first draft probs: {first_draft_probs.shape}, draft_probs is {draft_probs.shape}")
-        draft_probs= torch.cat([first_draft_probs,draft_probs],dim = 0)
-
-        reshape_logit = verification_probs.view(-1,self.k_config[0],logits.size(-1)) # for later new token sampling 
-
-        ground_to_verify = verification_probs[:-self.k_config[0],:].view(-1,self.k_config[0], logits.size(-1))
-        token_to_verify = unverified_tokens.view(-1, self.k_config[0])
-        dim = len(cand_probs)
-        draft_probs_mask = draft_probs[torch.arange(dim)[:,None,None],
-                                           torch.arange(self.k_config[0])[None,:,None],
-                                           token_to_verify[:,:,None]].squeeze(-1)
-        ground_probs_mask = ground_to_verify[torch.arange(dim)[:,None,None],
-                                           torch.arange(self.k_config[0])[None,:,None],
-                                           token_to_verify[:,:,None]].squeeze(-1)
-
-        ground_over_cand = ground_probs_mask/draft_probs_mask
-        accept_prob = torch.rand(dim,self.k_config[0],device=self.target_model_device)
-        posterior_mask = (ground_over_cand>=accept_prob).int()
-        candidate_accept_length = (torch.cumprod(posterior_mask,dim=0)).sum(dim=0)
-
-        # stats purpose
-        # for i, al in enumerate(candidate_accept_length):
-        #     self.maximum_token_path[i].append(al)
-
-
-        longest_length  = candidate_accept_length.max().item()
-        if longest_length == 0:
-            # all rejected 
-            next_multi_tokens_logits = current_ground_prob
-            # this logits should be the last multi-token's target logits 
-            keep_indices.append(init_input_length)# the logits immediately after input, 
-        else: 
-            
-            longest_candidate_index = torch.argmax(candidate_accept_length).item()
-            self.maximum_token_path[longest_candidate_index].append(longest_length)
-            # print(f"check longest_candidate_index {longest_candidate_index} ")
-            if longest_length == len(cand_probs):
-                next_multi_tokens_logits = reshape_logit[longest_length,longest_candidate_index]
-            else:
-                # normalized the distribution to restore the target distribution 
-                # ⭐ the candidate prob need -1 because the depth of candidate prob is always one less than logits, due to target first 
-
-                diff = reshape_logit[longest_length,longest_candidate_index] - torch.softmax(draft_probs[longest_length-1,longest_candidate_index],dim=-1) 
-                diff_max = torch.where(diff>0,diff,torch.zeros_like(diff))
-                diff_max_sum = torch.sum(diff_max,dim=-1,keepdim=True)
-                next_multi_tokens_logits = diff_max/diff_max_sum
-                # next_multi_tokens_logits = reshape_logit[longest_length,longest_candidate_index]
-            
-            for depth in range(longest_length):
-                keep_indices.append(depth * (self.k_config[0]) + longest_candidate_index+init_input_length) # minus one here because the index start from 0
-        keep_indices = torch.tensor(
-            keep_indices, dtype=torch.long, device=self.target_model_device
-        )
-        # print(f"check if keep_indices have redundant {keep_indices}")
-        tail_ground_token = torch.multinomial(next_multi_tokens_logits, num_samples=1).to(
-            device=input_ids.device
-        )
-        input_ids = input_ids.index_select(dim=1, index=keep_indices)
-        input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)
-        if longest_length == len(cand_probs):
-            draft_keep_indices = keep_indices[: len(keep_indices)-1]
-        else:
-            draft_keep_indices = keep_indices
-        for i in range(len(target_model_past_key_values)):
-            keep_indices = keep_indices.to(
-                device=target_model_past_key_values[i][0].device
-            )
-            target_model_past_key_values[i] = (
-                target_model_past_key_values[i][0].index_select(
-                    dim=2, index=keep_indices
-                ),
-                target_model_past_key_values[i][1].index_select(
-                    dim=2, index=keep_indices
-                ),
-            )
-        for i in range(len(draft_model_past_key_values)):
-            draft_model_past_key_values[i] = (
-                draft_model_past_key_values[i][0].index_select(
-                    dim=2, index=draft_keep_indices
-                ),
-                draft_model_past_key_values[i][1].index_select(
-                    dim=2, index=draft_keep_indices
-                ),
-            )
-
-        return DecoderOnlyVerificationOutput(
-            sequences=input_ids,
-            target_model_past_key_values=target_model_past_key_values,
-            draft_model_past_key_values=draft_model_past_key_values,
-            acceptance_count=longest_length,
-        )
-
-        
-
-
 
     def verify(
         self,
@@ -770,11 +637,9 @@ class TreeStrategy(Strategy):
         else:
             draft_keep_indices = keep_indices
 
-        #⭐ check if using multimonial make difference 
         tail_ground_token = torch.multinomial(current_ground_prob, num_samples=1).to(
             device=input_ids.device
         )
-        # tail_ground_token = torch.argmax(current_ground_prob).to(device=input_ids.device)[None]
 
         input_ids = input_ids.index_select(dim=1, index=keep_indices)
         input_ids = torch.cat((input_ids, tail_ground_token[None]), dim=1)

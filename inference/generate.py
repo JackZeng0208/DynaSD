@@ -115,7 +115,6 @@ class SpeculativeGenerator:
         self.eos_token_id = eos_token_id
         self.max_new_tokens = max_new_tokens
         self.strategy: strategies.Strategy = None
-        self.stats = []
 
         if tree_attn:
             self.strategy = strategies.TreeStrategy(
@@ -157,18 +156,13 @@ class SpeculativeGenerator:
             )
 
             draft_model_past_key_values = draft_output.past_key_values
-            verification_output = self.strategy.mask_verify(
+
+            verification_output = self.strategy.verify(
                 input_ids=draft_output.sequences,
                 target_model_past_key_values=target_model_past_key_values,
                 draft_model_past_key_values=draft_output.past_key_values,
-                cand_probs=draft_output.cand_probs,)
-
-            # verification_output = self.strategy.verify(
-            #     input_ids=draft_output.sequences,
-            #     target_model_past_key_values=target_model_past_key_values,
-            #     draft_model_past_key_values=draft_output.past_key_values,
-            #     cand_probs=draft_output.cand_probs,
-            # )
+                cand_probs=draft_output.cand_probs,
+            )
 
             input_ids = verification_output.sequences
 
@@ -187,7 +181,6 @@ class SpeculativeGenerator:
                 or input_ids.size(-1) - init_input_len >= self.max_new_tokens
             ):
                 break
-        self.stats = self.strategy.maximum_token_path
         return DecoderOnlyOutput(
             sequences=input_ids,
             acceptance_count=acceptance_count,
