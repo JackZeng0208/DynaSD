@@ -1,12 +1,11 @@
 # Reference: 
 import time 
-import warnings
 from dataclasses import dataclass
 from typing import Callable, List, Literal, Optional, Tuple, Union
 
 import torch
 from transformers.modeling_outputs import BaseModelOutputWithPast
-from DynaSD.decision_models import  *
+from inference.decision_models import  *
 from scipy import stats
 import pickle
 
@@ -104,6 +103,10 @@ class NewTreeStrategy:
         if draft_model_temp >0 or target_model_temp>0 and greedy == True:
             print(f"temperature is non zero, greedy turn to false")
             self.greedy = False
+
+        if draft_model_temp ==0 and target_model_temp ==0 and greedy == False:
+            print(f"temperature is zero using greedy sampling")
+            self.greedy = True
         self.max_new_tokens = max_new_tokens
         self.eos_token_id = eos_token_id
         self.max_config = self.generate_fork_config(width=config_width,depth=config_depth)
@@ -125,9 +128,7 @@ class NewTreeStrategy:
         self.tree_attn_self_mask = get_tree_attn_self_mask(self.max_config).to(
             device=self.draft_model_device
         )
-
         
-
         # decision model train data collection 
         self.draft_hidden_states = None # input of decision model 
         self.verification_result = None 
@@ -607,11 +608,12 @@ class NewTreeStrategy:
         ground_over_cand = ground_probs_mask/draft_probs_mask
         accept_prob = torch.rand(dim,self.max_config[0],device=self.target_model_device)
         posterior_mask = (ground_over_cand>=accept_prob).int()
+
         if self.generate_training_data:
             if self.verification_result == None:
-                self.verification_result = ground_over_cand.view(-1,1)
+                self.verification_result = ground_over_cand.view(-1,1).clamp(min=0,max=1)
             else:
-                self.verification_result = torch.cat((self.verification_result,ground_over_cand.view(-1,1)),dim=0)
+                self.verification_result = torch.cat((self.verification_result,ground_over_cand.view(-1,1).clamp(min=0,max=1)),dim=0)
         # posterior_mask = posterior_mask.transpose(0,1)
         # candidate_accept_length = (torch.cumprod(posterior_mask,dim=-1)).sum(dim=-1)
         candidate_accept_length = (torch.cumprod(posterior_mask,dim=0)).sum(dim=0)
