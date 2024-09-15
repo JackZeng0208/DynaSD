@@ -3,7 +3,7 @@ import torch
 from transformers import AutoTokenizer
 from inference.fork_shape_tree_attn import *
 from inference.strategies import *
-from decision_models import *
+from inference.decision_models import *
 from model.llama_tree_attn import LlamaForCausalLM
 import datasets
 from tqdm import tqdm
@@ -169,7 +169,7 @@ prompts = [" ".join(example['prompt']) for example in dataset]
 fig, axs = plt.subplots(1, 2, figsize=(14, 6))
 
 # Plot 1: Width vs Acceptance Rate
-with open('/home/iasl-transformers/DynaSD/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
+with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
     reader = csv.reader(file)
     for row in reader:
         target_model = row[0]
@@ -182,7 +182,7 @@ with open('/home/iasl-transformers/DynaSD/dynasd_acc_rate_speed_vs_width.csv', m
         if target_model == 'lmsys/vicuna-7b-v1.5':
             target_model = 'Vicuna 7B'
         if target_model == 'meta-llama/Llama-2-7b-chat-hf':
-            target_model = 'Llama 2 7B'
+            target_model = 'Llama 2 7B Chat'
         if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
             draft_model = 'TinyLlama 1.1B'
         if draft_model == 'JackFram/llama-68m':
@@ -194,7 +194,7 @@ axs[0].legend()
 axs[0].grid(True)
 
 # Plot 2: Width vs Speed
-with open('/home/iasl-transformers/DynaSD/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
+with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
     reader = csv.reader(file)
     for row in reader:
         target_model = row[0]
@@ -206,7 +206,7 @@ with open('/home/iasl-transformers/DynaSD/dynasd_acc_rate_speed_vs_width.csv', m
         if target_model == 'lmsys/vicuna-7b-v1.5':
             target_model = 'Vicuna 7B'
         if target_model == 'meta-llama/Llama-2-7b-chat-hf':
-            target_model = 'Llama 2 7B'
+            target_model = 'Llama 2 7B Chat'
         if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
             draft_model = 'TinyLlama 1.1B'
         if draft_model == 'JackFram/llama-68m':
