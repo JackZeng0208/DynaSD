@@ -1,6 +1,6 @@
 import time
 import torch
-from transformers import AutoTokenizer, GenerationConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import datasets
 from tqdm import tqdm
 import gc
@@ -9,7 +9,7 @@ import random
 
 target_model_names = ["lmsys/vicuna-7b-v1.5", "meta-llama/Llama-2-7b-chat-hf"]
 dataset_names = ["mt_bench", "alpaca", "trivia_qa"]
-sampling_methods = ["greedy", "probabilistic"]
+sampling_methods = ["probabilistic"]
 
 max_new_tokens = 200
 
@@ -28,27 +28,19 @@ def vanilla_inference(target_model_name, prompts, max_new_tokens=max_new_tokens,
         input_ids = tokenizer.encode(prompt, return_tensors='pt').to('cuda')
         with torch.no_grad():
             start_time = time.time()
-            if use_greedy:
-                output = target_model.generate(
-                    input_ids,
-                    max_new_tokens=max_new_tokens,
-                    pad_token_id=tokenizer.eos_token_id,
-                    do_sample=False,
-                    num_beams=1,
-                )
-            else:
-                output = target_model.generate(
-                    input_ids,
-                    max_new_tokens=max_new_tokens,
-                    pad_token_id=tokenizer.eos_token_id,
-                    do_sample=True,
-                    temperature=1
-                )
+            output = target_model.generate(
+                input_ids,
+                max_new_tokens=max_new_tokens,
+                pad_token_id=tokenizer.eos_token_id,
+                do_sample=True,
+                temperature=0.7
+            )
 
             end_time = time.time()
         total_inference_time += end_time - start_time
         response = tokenizer.decode(output[0], skip_special_tokens=True)
         total_token_length += output.shape[1] - input_ids.shape[1]
+        torch.cuda.empty_cache()
         print(response)
 
     tokens_per_second = total_token_length / total_inference_time
@@ -88,8 +80,7 @@ for dataset_name in dataset_names:
     for sampling_method in sampling_methods:
         csv_data = {}
         use_greedy = False
-        if sampling_method == "greedy":
-            use_greedy = True
+        # for target_model in target_model_names:
         for target_model in target_model_names:
             print(f"Dataset: {dataset_name}")
             print(f"Model: {target_model}")
@@ -101,7 +92,7 @@ for dataset_name in dataset_names:
                 use_greedy=use_greedy)
             csv_data[target_model] = token_per_second
             print(f"Speed: {token_per_second}")
-        with open(f'vanilla_inference_{dataset_name}_{sampling_method}.csv', mode='w') as file:
+        with open(f'vanilla_inference_{dataset_name}_{sampling_method}_temp_0.7.csv', mode='w') as file:
             writer = csv.writer(file)
             for key, value in csv_data.items():
                 writer.writerow([key, value])

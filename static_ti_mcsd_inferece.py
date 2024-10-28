@@ -1,7 +1,10 @@
 import time
 import torch
+from inference.target_initialized_mcsd import *
 from transformers import AutoTokenizer
-from inference.generate import *
+# from inference.fork_shape_tree_attn import *
+# from inference.strategies import *
+# from inference.decision_models import *
 from model.llama_tree_attn import LlamaForCausalLM
 import datasets
 from tqdm import tqdm
@@ -13,20 +16,17 @@ target_model_names = ["lmsys/vicuna-7b-v1.5", "meta-llama/Llama-2-7b-chat-hf"]
 draft_model_names = ['TinyLlama/TinyLlama-1.1B-Chat-v1.0', 'JackFram/llama-68m']
 dataset_names = ["mt_bench", "alpaca", "trivia_qa"]
 sampling_methods = ["probabilistic"]
-
 max_new_tokens = 200
-replacement = False
-speculative_sampling = True
-tree_attn = True
-
-def mcsd_inference(target_model_name, draft_model_name, prompts, max_new_tokens=max_new_tokens, draft_model_temp = 0.7, target_model_temp = 0.7,replacement=replacement, speculative_sampling=speculative_sampling, tree_attn=tree_attn):
-    total_token_length = 0
-    acceptance_count = 0
-    draft_token_count = 0
-    k_config = (4,2,2,1)
+def dynasd_inference(target_model_name, 
+                     draft_model_name, 
+                     prompts, 
+                     temperature, 
+                     max_new_tokens=max_new_tokens, 
+):
+    mcsd_config = (2,4,4,1,1)
     draft_model = LlamaForCausalLM.from_pretrained(
         draft_model_name,
-        torch_dtype=torch.float32,
+        torch_dtype=torch.bfloat16,
     ).to('cuda')
     target_model = LlamaForCausalLM.from_pretrained(
         target_model_name,
@@ -36,47 +36,39 @@ def mcsd_inference(target_model_name, draft_model_name, prompts, max_new_tokens=
     target_model.eval()
 
     tokenizer = AutoTokenizer.from_pretrained(target_model_name)
-    generator = SpeculativeGenerator(
+    mcsd_strategy = TargetInitializedtMCSD(
         draft_model,
         target_model,
-        eos_token_id=tokenizer.eos_token_id,
-        k_config=k_config,
+        mcsd_config,
         max_new_tokens=max_new_tokens,
-        replacement=replacement,
-        speculative_sampling=speculative_sampling,
-        draft_model_temp=draft_model_temp,
-        target_model_temp=target_model_temp,
-        tree_attn=tree_attn,
+        eos_token_id=tokenizer.eos_token_id,
+        temperature=temperature
     )
+
+    acc_count = 0
+    total_generated_draft_tokens = 0
+    total_generated_tokens = 0
+    
     start_time = time.time()
     with torch.no_grad():
         for prompt_text in tqdm(prompts):
             inputs = tokenizer(prompt_text, return_tensors="pt").to("cuda")
             input_ids = inputs.input_ids
-            output = generator.generate(input_ids)
-            output_text = tokenizer.batch_decode(
-                output.sequences, skip_special_tokens=True
-            )
-            print(output_text)
-            total_token_length += output.sequences.shape[1] - input_ids.shape[1]
-            acceptance_count += output.acceptance_count
-            draft_token_count += output.draft_token_count
-            torch.cuda.empty_cache()
-            del inputs
-
+            output, stats = mcsd_strategy.generation_loop(input_ids=input_ids)
+            # print(tokenizer.batch_decode(output, skip_special_tokens=True))
+            total_generated_tokens += output.shape[1] - input_ids.shape[1]
+            acc_count += stats["ground_acceptance_count"].item()
+            total_generated_draft_tokens +=stats["total_generated_draft_tokens"]
     end_time = time.time()
     run_time = end_time - start_time
-    token_per_second = total_token_length / run_time
-    acceptance_rate = acceptance_count / draft_token_count
-    print(f"speed is {token_per_second}")
-    print(f"acceptance rate is {acceptance_rate}")
-    # average_longest_acc_length = [sum(path)/len(path) for path in generator.stats]
+    acc_rate = acc_count / total_generated_draft_tokens
+    speed = total_generated_tokens / run_time
     torch.cuda.empty_cache()
     del draft_model
     del target_model
     del tokenizer
     gc.collect()
-    return token_per_second, acceptance_rate
+    return speed, acc_rate
 
 for dataset_name in dataset_names:
     prompts = []
@@ -101,23 +93,28 @@ for dataset_name in dataset_names:
             prompt = "Answer the following question: " + example['question'] + " Write your answer here: "
             prompts.append(prompt)
         prompts = random.sample(prompts, 250)
-    
     for sampling_method in sampling_methods:
         csv_data = {}
+        if sampling_method == "greedy":
+            temperature = 0
+        elif sampling_method == "probabilistic":
+            temperature = 0.7
         for target_model in target_model_names:
             for draft_model in draft_model_names:
                 print(f"Dataset: {dataset_name}")
                 print(f"Target model: {target_model}, Draft model: {draft_model}")
                 print(f"Sampling method: {sampling_method}")
-                token_per_second, acc_rate = mcsd_inference(target_model_name=target_model, 
-                                                            draft_model_name=draft_model, 
-                                                            prompts=prompts, 
-                                                            draft_model_temp=0.7, 
-                                                            target_model_temp=0.7)
-                csv_data[(draft_model, target_model)] = [token_per_second, acc_rate]
-                print(f"Tokens per second: {token_per_second}")
-                print(f"Acceptance rate: {acc_rate}")
-        with open(f'mcsd_inference_{dataset_name}_{sampling_method}_4221.csv', mode='w') as file:
+                speed, acc_rate = dynasd_inference(
+                    target_model_name=target_model, 
+                    draft_model_name=draft_model, 
+                    prompts=prompts,
+                    temperature=temperature,
+                    max_new_tokens=max_new_tokens
+                    )
+                csv_data[(draft_model, target_model)] = [speed, acc_rate]
+                print(f"Speed: {speed}")
+                print(f"Acceptance Rate: {acc_rate}")
+        with open(f'dynasd_inference_{dataset_name}_{sampling_method}.csv', mode='w') as file:
             writer = csv.writer(file)
             for key, value in csv_data.items():
                 writer.writerow([key[0], key[1], value[0], value[1]])

@@ -14,11 +14,11 @@ import random
 target_model_names = ["lmsys/vicuna-7b-v1.5", "meta-llama/Llama-2-7b-chat-hf"]
 draft_model_names = ['TinyLlama/TinyLlama-1.1B-Chat-v1.0', 'JackFram/llama-68m']
 dataset_names = ["mt_bench", "alpaca", "trivia_qa"]
-sampling_methods = ["greedy","probabilistic"]
+sampling_methods = ["probabilistic"]
 
 max_new_tokens = 200
-def dynasd_inference(target_model_name, draft_model_name, prompts, draft_model_temp=0, target_model_temp=0, greedy=True, max_new_tokens=max_new_tokens, using_decision_model=True):
-    width = 16
+def dynasd_inference(target_model_name, draft_model_name, prompts, draft_model_temp=0, target_model_temp=0, greedy=True, max_new_tokens=max_new_tokens, using_decision_model=False):
+    width = 2
     depth = 5
     decision_threshold = 0.4
     if draft_model_name == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0' and target_model_name == 'lmsys/vicuna-7b-v1.5':
@@ -34,7 +34,7 @@ def dynasd_inference(target_model_name, draft_model_name, prompts, draft_model_t
     elif draft_model_name == 'JackFram/llama-68m':
         decision_model = DecisionModelV1().cuda()
     
-    decision_model_path = f'decision_model/weights/soft_{file_name}.pt'
+    decision_model_path = f'/home/iasl-transformers/DynaSD/decision_model/weights/soft_{file_name}.pt'
     draft_model = LlamaForCausalLM.from_pretrained(
         draft_model_name,
         torch_dtype=torch.float32,
@@ -78,7 +78,7 @@ def dynasd_inference(target_model_name, draft_model_name, prompts, draft_model_t
             inputs = tokenizer(prompt_text, return_tensors="pt").to("cuda")
             input_ids = inputs.input_ids
             output, stats = strategy.generation_loop(input_ids=input_ids)
-            print(tokenizer.batch_decode(output, skip_special_tokens=True))
+            # print(tokenizer.batch_decode(output, skip_special_tokens=True))
             total_generated_tokens += output.shape[1] - input_ids.shape[1]
             acc_count += stats["ground_acceptance_count"].item()
             total_generated_draft_tokens += stats["decision_acceptance_count"]
@@ -92,7 +92,7 @@ def dynasd_inference(target_model_name, draft_model_name, prompts, draft_model_t
     del tokenizer
     gc.collect()
     return speed, acc_rate
-
+    
 for dataset_name in dataset_names:
     prompts = []
     if dataset_name == "mt_bench":
@@ -118,14 +118,10 @@ for dataset_name in dataset_names:
         prompts = random.sample(prompts, 250)
     for sampling_method in sampling_methods:
         csv_data = {}
-        is_greedy = False
         if sampling_method == "greedy":
-            draft_model_temp = 0
-            target_model_temp = 0
-            is_greedy = True
+            temperature = 0
         elif sampling_method == "probabilistic":
-            draft_model_temp = 1
-            target_model_temp = 1
+            temperature = 0.7
         for target_model in target_model_names:
             for draft_model in draft_model_names:
                 print(f"Dataset: {dataset_name}")
@@ -135,11 +131,18 @@ for dataset_name in dataset_names:
                     target_model_name=target_model, 
                     draft_model_name=draft_model, 
                     prompts=prompts,
-                    draft_model_temp=draft_model_temp,
-                    target_model_temp=target_model_temp,
-                    greedy=is_greedy,
+                    draft_model_temp=0.7,
+                    target_model_temp=0.7,
+                    greedy=False,
                     max_new_tokens=max_new_tokens
                     )
+                # speed, acc_rate = dynasd_inference(
+                #     target_model_name=target_model, 
+                #     draft_model_name=draft_model, 
+                #     prompts=prompts,
+                #     temperature=temperature,
+                #     max_new_tokens=max_new_tokens
+                #     )
                 csv_data[(draft_model, target_model)] = [speed, acc_rate]
                 print(f"Speed: {speed}")
                 print(f"Acceptance Rate: {acc_rate}")

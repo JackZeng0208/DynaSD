@@ -1,0 +1,4 @@
+TinyLlama/TinyLlama-1.1B-Chat-v1.0,lmsys/vicuna-7b-v1.5,70.00936998362552,0.6330678553739475
+JackFram/llama-68m,lmsys/vicuna-7b-v1.5,96.45724865026041,0.35015140719629495
+TinyLlama/TinyLlama-1.1B-Chat-v1.0,meta-llama/Llama-2-7b-chat-hf,71.20969774119007,0.6426021328958163
+JackFram/llama-68m,meta-llama/Llama-2-7b-chat-hf,95.68546681654676,0.3430995837335895

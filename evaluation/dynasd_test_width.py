@@ -166,59 +166,59 @@ prompts = [" ".join(example['prompt']) for example in dataset]
 # plt.grid(True)
 # plt.savefig('dynasd_speed_vs_width.png')
 
-fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+# fig, axs = plt.subplots(1, 2, figsize=(14, 6))
 
-# Plot 1: Width vs Acceptance Rate
-with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
-    reader = csv.reader(file)
-    for row in reader:
-        target_model = row[0]
-        draft_model = row[1]
-        widths = row[2].strip('][').split(', ')
-        widths = list(map(int, widths))
-        print(widths)
-        acc_rates = row[3].strip('][').split(', ')
-        acc_rates = list(map(float, acc_rates))
-        if target_model == 'lmsys/vicuna-7b-v1.5':
-            target_model = 'Vicuna 7B'
-        if target_model == 'meta-llama/Llama-2-7b-chat-hf':
-            target_model = 'Llama 2 7B Chat'
-        if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
-            draft_model = 'TinyLlama 1.1B'
-        if draft_model == 'JackFram/llama-68m':
-            draft_model = 'Llama-68M'
-        axs[0].plot(widths, acc_rates, marker='o', label=f"{target_model} + {draft_model}")
-axs[0].set_xlabel('Width')
-axs[0].set_ylabel('Acceptance Rate')
-axs[0].legend()
-axs[0].grid(True)
+# # Plot 1: Width vs Acceptance Rate
+# with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
+#     reader = csv.reader(file)
+#     for row in reader:
+#         target_model = row[0]
+#         draft_model = row[1]
+#         widths = row[2].strip('][').split(', ')
+#         widths = list(map(int, widths))
+#         print(widths)
+#         acc_rates = row[3].strip('][').split(', ')
+#         acc_rates = list(map(float, acc_rates))
+#         if target_model == 'lmsys/vicuna-7b-v1.5':
+#             target_model = 'Vicuna 7B'
+#         if target_model == 'meta-llama/Llama-2-7b-chat-hf':
+#             target_model = 'Llama 2 7B Chat'
+#         if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
+#             draft_model = 'TinyLlama 1.1B'
+#         if draft_model == 'JackFram/llama-68m':
+#             draft_model = 'Llama-68M'
+#         axs[0].plot(widths, acc_rates, marker='o', label=f"{target_model} + {draft_model}")
+# axs[0].set_xlabel('Width')
+# axs[0].set_ylabel('Acceptance Rate')
+# axs[0].legend()
+# axs[0].grid(True)
 
-# Plot 2: Width vs Speed
-with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
-    reader = csv.reader(file)
-    for row in reader:
-        target_model = row[0]
-        draft_model = row[1]
-        widths = row[2].strip('][').split(', ')
-        widths = list(map(int, widths))
-        speeds = row[4].strip('][').split(', ')
-        speeds = list(map(float, speeds))
-        if target_model == 'lmsys/vicuna-7b-v1.5':
-            target_model = 'Vicuna 7B'
-        if target_model == 'meta-llama/Llama-2-7b-chat-hf':
-            target_model = 'Llama 2 7B Chat'
-        if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
-            draft_model = 'TinyLlama 1.1B'
-        if draft_model == 'JackFram/llama-68m':
-            draft_model = 'Llama-68M'
-        axs[1].plot(widths, speeds, marker='o', label=f"{target_model} + {draft_model}")
-axs[1].set_xlabel('Width')
-axs[1].set_ylabel('Generation Speed (tokens/s)')
-axs[1].set_ylim(bottom=18, top=max(speeds) + 30)
-axs[1].legend(loc='lower right')
-axs[1].grid(True)
+# # Plot 2: Width vs Speed
+# with open('/home/iasl-transformers/DynaSD/results/dynasd_acc_rate_speed_vs_width.csv', mode='r') as file:
+#     reader = csv.reader(file)
+#     for row in reader:
+#         target_model = row[0]
+#         draft_model = row[1]
+#         widths = row[2].strip('][').split(', ')
+#         widths = list(map(int, widths))
+#         speeds = row[4].strip('][').split(', ')
+#         speeds = list(map(float, speeds))
+#         if target_model == 'lmsys/vicuna-7b-v1.5':
+#             target_model = 'Vicuna 7B'
+#         if target_model == 'meta-llama/Llama-2-7b-chat-hf':
+#             target_model = 'Llama 2 7B Chat'
+#         if draft_model == 'TinyLlama/TinyLlama-1.1B-Chat-v1.0':
+#             draft_model = 'TinyLlama 1.1B'
+#         if draft_model == 'JackFram/llama-68m':
+#             draft_model = 'Llama-68M'
+#         axs[1].plot(widths, speeds, marker='o', label=f"{target_model} + {draft_model}")
+# axs[1].set_xlabel('Width')
+# axs[1].set_ylabel('Generation Speed (tokens/s)')
+# axs[1].set_ylim(bottom=18, top=max(speeds) + 30)
+# axs[1].legend(loc='lower right')
+# axs[1].grid(True)
 
-# Save and show the plots
-plt.tight_layout()
-plt.savefig('dynasd_width.png')
-plt.show()
+# # Save and show the plots
+# plt.tight_layout()
+# plt.savefig('dynasd_width.png')
+# plt.show()

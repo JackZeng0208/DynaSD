@@ -597,6 +597,7 @@ class NewTreeStrategy:
         # no need the last layer logits for verification 
         ground_probs_to_verify = ground_probs[:-self.max_config[0],:].view(-1,self.max_config[0],logits.size(-1))
         token_to_verify = input_ids[:,init_input_length+self.max_config[0]:].view(-1,self.max_config[0])
+        # print(f"dim is {dim} shape of candidate_probs is {candidate_probs.shape}, ground probs to verify is {ground_probs_to_verify.shape}, token to verify { token_to_verify.shape}")
     
         draft_probs_mask = candidate_probs[torch.arange(dim)[:,None,None],
                                            torch.arange(self.max_config[0])[None,:,None],
