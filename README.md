@@ -1,5 +1,5 @@
 # Improving Multi-candidate Speculative Decoding
-Paper link: [https://arxiv.org/abs/2409.10644]()
+[Paper link](https://arxiv.org/abs/2409.10644)
 
 # News
 - October 28, 2024: Camera-ready version of paper is available on Arxiv
